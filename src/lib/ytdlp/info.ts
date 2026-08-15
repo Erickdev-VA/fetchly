@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { AppError } from "../errors";
 import { logger } from "../logger";
 import { YTDLP_PATH, FFMPEG_PATH } from "./binary";
+import { getCookiesArgs } from "./cookies";
 import type { RawYtDlpInfo } from "./rawTypes";
 
 const INFO_TIMEOUT_MS = 25_000;
@@ -15,11 +16,11 @@ export function fetchMediaInfo(url: string): Promise<RawYtDlpInfo> {
         "--dump-single-json",
         "--no-warnings",
         "--no-playlist",
-        "--no-call-home",
         "--socket-timeout",
         "15",
         "--ffmpeg-location",
         FFMPEG_PATH,
+        ...getCookiesArgs(),
         "--",
         url,
       ],

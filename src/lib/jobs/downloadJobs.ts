@@ -4,6 +4,7 @@ import os from "node:os";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
 import { YTDLP_PATH, FFMPEG_PATH } from "../ytdlp/binary";
+import { getCookiesArgs } from "../ytdlp/cookies";
 import { stripTrack } from "../ytdlp/postprocess";
 import { logger } from "../logger";
 import type { DownloadMode } from "../platform/types";
@@ -140,6 +141,7 @@ export async function startDownloadJob(opts: {
     MAX_FILESIZE,
     "--socket-timeout",
     "15",
+    ...getCookiesArgs(),
   ];
   if (plan.needsMerge) args.push("--merge-output-format", "mp4");
   args.push("--", opts.url);
