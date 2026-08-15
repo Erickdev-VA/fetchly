@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { AppError } from "../errors";
+import { logger } from "../logger";
 import { YTDLP_PATH, FFMPEG_PATH } from "./binary";
 import type { RawYtDlpInfo } from "./rawTypes";
 
@@ -39,6 +40,8 @@ export function fetchMediaInfo(url: string): Promise<RawYtDlpInfo> {
         }
 
         const text = stderr || error.message || "";
+        logger.error("yt-dlp metadata fetch failed", { stderr: text.slice(-2000) });
+
         if (/private|login required|rate-?limit/i.test(text)) {
           reject(new AppError("CONTENT_PRIVATE"));
         } else if (/unavailable|not available|removed|404|does not exist/i.test(text)) {
