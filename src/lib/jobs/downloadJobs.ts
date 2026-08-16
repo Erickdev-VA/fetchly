@@ -5,6 +5,7 @@ import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
 import { YTDLP_PATH, FFMPEG_PATH } from "../ytdlp/binary";
 import { getCookiesArgs } from "../ytdlp/cookies";
+import { getJsRuntimeArgs, getJsRuntimeEnv } from "../ytdlp/jsRuntime";
 import { stripTrack } from "../ytdlp/postprocess";
 import { logger } from "../logger";
 import type { DownloadMode } from "../platform/types";
@@ -130,6 +131,13 @@ export async function startDownloadJob(opts: {
   const args = [
     "-f",
     plan.selector,
+    // Prefer H.264/AAC over AV1/VP9+Opus: those decode natively on every
+    // phone and share fine over WhatsApp/iMessage, whereas AV1 in
+    // particular fails silently on a lot of iPhones (no thumbnail, won't
+    // play, won't send) even though the file itself is perfectly valid.
+    // This is picking a different original-quality stream, not re-encoding.
+    "-S",
+    "vcodec:h264,acodec:aac",
     "-o",
     outputTemplate,
     "--no-playlist",
@@ -141,12 +149,17 @@ export async function startDownloadJob(opts: {
     MAX_FILESIZE,
     "--socket-timeout",
     "15",
+    ...getJsRuntimeArgs(),
     ...getCookiesArgs(),
   ];
   if (plan.needsMerge) args.push("--merge-output-format", "mp4");
   args.push("--", opts.url);
 
-  const child = spawn(YTDLP_PATH, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(YTDLP_PATH, args, {
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, ...getJsRuntimeEnv() },
+  });
   job.child = child;
   job.status = "processing";
 

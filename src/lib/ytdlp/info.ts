@@ -3,6 +3,7 @@ import { AppError } from "../errors";
 import { logger } from "../logger";
 import { YTDLP_PATH, FFMPEG_PATH } from "./binary";
 import { getCookiesArgs } from "./cookies";
+import { getJsRuntimeArgs, getJsRuntimeEnv } from "./jsRuntime";
 import type { RawYtDlpInfo } from "./rawTypes";
 
 const INFO_TIMEOUT_MS = 25_000;
@@ -20,11 +21,17 @@ export function fetchMediaInfo(url: string): Promise<RawYtDlpInfo> {
         "15",
         "--ffmpeg-location",
         FFMPEG_PATH,
+        ...getJsRuntimeArgs(),
         ...getCookiesArgs(),
         "--",
         url,
       ],
-      { timeout: INFO_TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES, windowsHide: true },
+      {
+        timeout: INFO_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER_BYTES,
+        windowsHide: true,
+        env: { ...process.env, ...getJsRuntimeEnv() },
+      },
       (error, stdout, stderr) => {
         if (!error) {
           try {
