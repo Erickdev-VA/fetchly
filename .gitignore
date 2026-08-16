@@ -48,3 +48,6 @@ next-env.d.ts
 
 # local dev tooling (not part of the app)
 /.claude/
+
+# electron-builder output
+/release/
