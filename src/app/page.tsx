@@ -83,15 +83,7 @@ export default function Home() {
           {status === "analyzing" && <AnalyzingIndicator />}
           {status === "error" && error && <ErrorBanner message={error} onDismiss={() => setStatus("idle")} />}
           {status === "ready" && media?.kind === "media" && (
-            <MediaCard
-              media={media}
-              mode={mode}
-              shareable={shareable}
-              onOpenPlaylist={(playlistUrl) => {
-                setUrl(playlistUrl);
-                void runAnalysis(playlistUrl);
-              }}
-            />
+            <MediaCard media={media} mode={mode} shareable={shareable} />
           )}
           {status === "ready" && media?.kind === "playlist" && (
             <PlaylistCard key={media.analysisId} playlist={media} mode={mode} shareable={shareable} />

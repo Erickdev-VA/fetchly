@@ -11,13 +11,20 @@ export function getYouTubePlaylistId(url: URL): string | null {
   return list && PLAYLIST_ID_RE.test(list) ? list : null;
 }
 
-/** A link to the playlist itself (as opposed to one video opened inside it). */
-export function isYouTubePlaylistPage(url: URL): boolean {
-  return url.pathname.replace(/\/+$/, "") === "/playlist" && getYouTubePlaylistId(url) !== null;
+/** The video a YouTube link points at (`watch?v=`, `youtu.be/<id>`, `shorts/<id>`), if any. */
+export function getYouTubeVideoId(url: URL): string | null {
+  const candidate =
+    url.searchParams.get("v") ??
+    (url.hostname === "youtu.be" ? url.pathname.slice(1) : url.pathname.match(/^\/shorts\/([^/]+)/)?.[1]);
+  return candidate && VIDEO_ID_RE.test(candidate) ? candidate : null;
 }
 
-export function youtubePlaylistUrl(listId: string): string {
-  return `https://www.youtube.com/playlist?list=${encodeURIComponent(listId)}`;
+/**
+ * "Mix"/radio lists (RD…) are generated on the fly and effectively endless,
+ * so only their first stretch is listed.
+ */
+export function isYouTubeMix(listId: string): boolean {
+  return listId.startsWith("RD");
 }
 
 export function youtubeVideoUrl(videoId: string): string {

@@ -19,8 +19,6 @@ export interface MediaInfo {
   qualities: QualityOption[];
   hasAudioTrack: boolean;
   bestAudioEstSizeBytes: number | null;
-  /** Set when the link was a video opened from inside a playlist. */
-  playlistUrl: string | null;
 }
 
 export interface PlaylistEntry {
@@ -38,6 +36,8 @@ export interface PlaylistInfo {
   title: string;
   author: string | null;
   entries: PlaylistEntry[];
+  /** The video the link pointed at, when it was a video opened inside the playlist. */
+  focusEntryId: string | null;
   /** True when the playlist has more videos than we list. */
   truncated: boolean;
 }

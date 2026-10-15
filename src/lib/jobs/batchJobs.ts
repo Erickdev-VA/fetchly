@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import type { ChildProcess } from "node:child_process";
 import { killProcessTree } from "../ytdlp/process";
 import { runDownload, DownloadError } from "./runDownload";
@@ -11,6 +11,8 @@ import type { DownloadMode } from "../platform/types";
 const BATCH_CONCURRENCY = Number(process.env.BATCH_CONCURRENCY ?? 2);
 /** How long finished files stay available for download after the batch ends. */
 const FINISHED_TTL_MS = 60 * 60 * 1000;
+const ITEM_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 3000;
 
 export type BatchItemStatus = "queued" | "downloading" | "converting" | "completed" | "error" | "cancelled";
 
@@ -87,8 +89,12 @@ export function getBatch(id: string): BatchJob | null {
 
 async function runItem(batch: BatchJob, item: BatchItem): Promise<void> {
   const itemDir = path.join(batch.tempDir, String(item.index));
+  // Start from an empty dir so a retry never picks up a failed attempt's leftovers.
+  await rm(itemDir, { recursive: true, force: true });
   await mkdir(itemDir, { recursive: true });
   item.status = "downloading";
+  item.percent = 0;
+  item.errorMessage = undefined;
   try {
     item.filePath = await runDownload({
       url: item.url,
@@ -131,7 +137,20 @@ async function runBatch(batch: BatchJob): Promise<void> {
         item.status = "cancelled";
         continue;
       }
-      await runItem(batch, item);
+      // YouTube occasionally rejects a download (a one-off 403) that works
+      // fine moments later, so give each failed video one more try.
+      for (let attempt = 1; attempt <= ITEM_ATTEMPTS; attempt++) {
+        if (attempt > 1 && batch.cancelled) {
+          item.status = "cancelled";
+          break;
+        }
+        await runItem(batch, item);
+        if (item.status !== "error" || batch.cancelled) break;
+        if (attempt < ITEM_ATTEMPTS) {
+          item.status = "queued"; // don't flash "Failed" in the UI before the retry
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        }
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, BATCH_CONCURRENCY) }, worker));

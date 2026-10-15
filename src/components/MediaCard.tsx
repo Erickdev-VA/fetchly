@@ -12,12 +12,10 @@ export function MediaCard({
   media,
   mode,
   shareable,
-  onOpenPlaylist,
 }: {
   media: MediaInfo;
   mode: DownloadMode;
   shareable: boolean;
-  onOpenPlaylist: (url: string) => void;
 }) {
   const [quality, setQuality] = useState<number | "best">("best");
   const { state, start, reset } = useDownloadJob();
@@ -107,17 +105,6 @@ export function MediaCard({
           </div>
 
           {state.phase === "error" && <p className="text-xs text-red-300">{state.message}</p>}
-
-          {media.playlistUrl && (
-            <button
-              type="button"
-              onClick={() => onOpenPlaylist(media.playlistUrl!)}
-              disabled={isBusy}
-              className="self-start text-xs font-medium text-[var(--accent)] transition hover:brightness-125 disabled:opacity-40"
-            >
-              This video is part of a playlist — see all its videos →
-            </button>
-          )}
         </div>
       </div>
     </div>

@@ -5,21 +5,27 @@ import { assertBinariesPresent } from "@/lib/ytdlp/binary";
 import { normalizeMediaInfo } from "@/lib/platform/normalize";
 import {
   getYouTubePlaylistId,
-  isYouTubePlaylistPage,
+  getYouTubeVideoId,
+  isYouTubeMix,
   normalizePlaylist,
-  youtubePlaylistUrl,
   youtubeVideoUrl,
 } from "@/lib/platform/playlist";
 import { saveAnalysis } from "@/lib/jobs/analysisCache";
 import { checkRateLimit, getClientKey } from "@/lib/ratelimit";
 import { AppError } from "@/lib/errors";
 import { errorResponse } from "@/lib/http";
+import { logger } from "@/lib/logger";
 import type { MediaInfo, Platform, PlaylistInfo } from "@/lib/platform/types";
 
 const MAX_DURATION_SECONDS = 3 * 60 * 60;
+const MAX_MIX_ENTRIES = 50;
 
-async function analyzePlaylist(url: URL, platform: Platform): Promise<PlaylistInfo> {
-  const raw = await fetchPlaylistInfo(url.href);
+async function analyzePlaylist(url: URL, platform: Platform, listId: string): Promise<PlaylistInfo> {
+  const isMix = isYouTubeMix(listId);
+  const maxEntries = isMix ? MAX_MIX_ENTRIES : MAX_PLAYLIST_ENTRIES;
+  // The original link is passed as-is (not rewritten to /playlist?list=):
+  // Mixes only resolve from a watch URL, and yt-dlp handles every form.
+  const raw = await fetchPlaylistInfo(url.href, maxEntries);
   const playlist = normalizePlaylist(raw);
   if (playlist.entries.length === 0) throw new AppError("CONTENT_UNAVAILABLE", "This playlist has no downloadable videos.");
 
@@ -32,6 +38,7 @@ async function analyzePlaylist(url: URL, platform: Platform): Promise<PlaylistIn
     ),
   });
 
+  const videoId = getYouTubeVideoId(url);
   return {
     kind: "playlist",
     analysisId,
@@ -39,7 +46,8 @@ async function analyzePlaylist(url: URL, platform: Platform): Promise<PlaylistIn
     title: playlist.title,
     author: playlist.author,
     entries: playlist.entries,
-    truncated: playlist.totalCount > MAX_PLAYLIST_ENTRIES,
+    focusEntryId: videoId && playlist.entries.some((e) => e.id === videoId) ? videoId : null,
+    truncated: isMix || playlist.totalCount > maxEntries,
   };
 }
 
@@ -66,8 +74,6 @@ async function analyzeMedia(url: URL, platform: Platform): Promise<MediaInfo> {
     hasAnyAudio: normalized.hasAnyAudio,
   });
 
-  const listId = platform === "youtube" ? getYouTubePlaylistId(url) : null;
-
   return {
     kind: "media",
     analysisId,
@@ -79,7 +85,6 @@ async function analyzeMedia(url: URL, platform: Platform): Promise<MediaInfo> {
     qualities: normalized.qualities,
     hasAudioTrack: normalized.hasAnyAudio,
     bestAudioEstSizeBytes: normalized.bestAudioEstSizeBytes,
-    playlistUrl: listId ? youtubePlaylistUrl(listId) : null,
   };
 }
 
@@ -95,12 +100,21 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null);
     const { url, platform } = await validateAndDetectPlatform((body as { url?: unknown } | null)?.url);
 
-    const result =
-      platform === "youtube" && isYouTubePlaylistPage(url)
-        ? await analyzePlaylist(url, platform)
-        : await analyzeMedia(url, platform);
+    // Any YouTube link carrying a list — the playlist page itself, a video
+    // opened inside it, a share link, a Mix — opens the playlist picker.
+    const listId = platform === "youtube" ? getYouTubePlaylistId(url) : null;
+    if (listId) {
+      try {
+        return NextResponse.json(await analyzePlaylist(url, platform, listId));
+      } catch (err) {
+        // Lists that need a login (Watch later, Liked videos…) can't be read;
+        // if the link also names a video, fall back to just that video.
+        if (!getYouTubeVideoId(url)) throw err;
+        logger.warn("playlist analysis failed, falling back to the single video", { listId });
+      }
+    }
 
-    return NextResponse.json(result);
+    return NextResponse.json(await analyzeMedia(url, platform));
   } catch (err) {
     return errorResponse(err);
   }

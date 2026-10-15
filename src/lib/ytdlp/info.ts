@@ -80,9 +80,9 @@ export function fetchMediaInfo(url: string): Promise<RawYtDlpInfo> {
  * Lists a playlist's entries without resolving each video (`--flat-playlist`),
  * which takes a few seconds even for long playlists instead of minutes.
  */
-export function fetchPlaylistInfo(url: string): Promise<RawYtDlpPlaylist> {
+export function fetchPlaylistInfo(url: string, maxEntries = MAX_PLAYLIST_ENTRIES): Promise<RawYtDlpPlaylist> {
   return runYtDlpJson<RawYtDlpPlaylist>(
-    ["--flat-playlist", "--yes-playlist", "--playlist-end", String(MAX_PLAYLIST_ENTRIES), "--", url],
+    ["--flat-playlist", "--yes-playlist", "--playlist-end", String(maxEntries), "--", url],
     PLAYLIST_TIMEOUT_MS,
   );
 }

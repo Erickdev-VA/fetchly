@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PLAYLIST_HEIGHTS, type DownloadMode, type PlaylistInfo } from "@/lib/platform/types";
 import { formatDuration } from "@/lib/format";
 import { getBatchItemUrl, getBatchZipUrl, type BatchItemStatus } from "@/lib/api";
@@ -50,6 +50,16 @@ export function PlaylistCard({
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(playlist.entries.map((e) => e.id)));
   const [quality, setQuality] = useState<number | "best">("best");
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // A link to a video inside the playlist: bring that video into view.
+  useEffect(() => {
+    const list = listRef.current;
+    const row = playlist.focusEntryId
+      ? list?.querySelector<HTMLElement>(`[data-entry-id="${playlist.focusEntryId}"]`)
+      : null;
+    if (list && row) list.scrollTop = row.offsetTop - list.clientHeight / 2 + row.offsetHeight / 2;
+  }, [playlist.focusEntryId]);
   const { state, start, cancel, reset } = useBatchJob();
 
   const progress = state.phase === "running" || state.phase === "done" ? state.progress : null;
@@ -142,13 +152,20 @@ export function PlaylistCard({
         )}
       </div>
 
-      <ul className="mt-3 max-h-[420px] divide-y divide-white/5 overflow-y-auto rounded-xl border border-white/5 bg-black/20">
+      <ul
+        ref={listRef}
+        className="relative mt-3 max-h-[420px] divide-y divide-white/5 overflow-y-auto rounded-xl border border-white/5 bg-black/20"
+      >
         {visibleEntries.map((entry, i) => {
           const isSelected = selected.has(entry.id);
           const item = progressById.get(entry.id);
           const duration = formatDuration(entry.durationSeconds);
           return (
-            <li key={entry.id}>
+            <li
+              key={entry.id}
+              data-entry-id={entry.id}
+              className={entry.id === playlist.focusEntryId ? "bg-[var(--accent)]/[0.07]" : undefined}
+            >
               <div
                 role={locked ? undefined : "checkbox"}
                 aria-checked={locked ? undefined : isSelected}
@@ -196,7 +213,14 @@ export function PlaylistCard({
                   )}
                 </div>
                 <div className="relative min-w-0 flex-1">
-                  <p className="line-clamp-2 text-[13px] leading-snug text-white/90">{entry.title}</p>
+                  <p className="line-clamp-2 text-[13px] leading-snug text-white/90">
+                    {entry.id === playlist.focusEntryId && (
+                      <span className="mr-1.5 rounded bg-[var(--accent)]/25 px-1 py-px text-[10px] font-semibold text-white/90">
+                        Your link
+                      </span>
+                    )}
+                    {entry.title}
+                  </p>
                   {item ? (
                     <p
                       className={`mt-0.5 text-[11px] ${
