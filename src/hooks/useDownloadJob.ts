@@ -9,6 +9,7 @@ export type DownloadState =
   | { phase: "starting" }
   | { phase: "preparing"; percent: number }
   | { phase: "processing"; percent: number }
+  | { phase: "converting"; percent: number }
   | { phase: "completed" }
   | { phase: "error"; message: string };
 
@@ -31,7 +32,7 @@ export function useDownloadJob() {
   }, [stopPolling]);
 
   const start = useCallback(
-    async (params: { analysisId: string; mode: DownloadMode; height: number | "best" }) => {
+    async (params: { analysisId: string; mode: DownloadMode; height: number | "best"; shareable: boolean }) => {
       stopPolling();
       setState({ phase: "starting" });
       try {
@@ -49,7 +50,11 @@ export function useDownloadJob() {
               stopPolling();
               setState({ phase: "error", message: progress.errorMessage ?? "The download failed." });
             } else {
-              setState({ phase: progress.status, percent: progress.percent });
+              setState(
+                progress.converting
+                  ? { phase: "converting", percent: progress.percent }
+                  : { phase: progress.status, percent: progress.percent },
+              );
             }
           } catch {
             stopPolling();

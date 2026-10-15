@@ -12,6 +12,7 @@ export async function GET(_request: Request, context: { params: Promise<{ jobId:
     return NextResponse.json({
       status: job.status,
       percent: Math.round(job.percent),
+      converting: job.status === "processing" && job.converting,
       errorMessage: job.errorMessage ?? null,
       fileName: job.fileName ?? null,
     });

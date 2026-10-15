@@ -7,8 +7,10 @@ import { ModeToggle } from "@/components/ModeToggle";
 import { AnalyzingIndicator } from "@/components/AnalyzingIndicator";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { MediaCard } from "@/components/MediaCard";
+import { PlaylistCard } from "@/components/PlaylistCard";
+import { ShareableToggle } from "@/components/ShareableToggle";
 import { analyzeUrl, ApiError } from "@/lib/api";
-import type { MediaInfo, DownloadMode } from "@/lib/platform/types";
+import type { AnalyzeResult, DownloadMode } from "@/lib/platform/types";
 
 type Status = "idle" | "analyzing" | "ready" | "error";
 
@@ -16,7 +18,8 @@ export default function Home() {
   const [url, setUrl] = useState("");
   const [mode, setMode] = useState<DownloadMode>("auto");
   const [status, setStatus] = useState<Status>("idle");
-  const [media, setMedia] = useState<MediaInfo | null>(null);
+  const [shareable, setShareable] = useState(true);
+  const [media, setMedia] = useState<AnalyzeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
 
@@ -72,13 +75,27 @@ export default function Home() {
             disabled={isBusy}
           />
           <ModeToggle value={mode} onChange={setMode} disabled={isBusy} />
+          <ShareableToggle value={shareable} onChange={setShareable} disabled={isBusy} />
           {pasteNotice && <p className="text-center text-xs text-white/40">{pasteNotice}</p>}
         </div>
 
         <div className="flex w-full max-w-xl flex-col items-center gap-4">
           {status === "analyzing" && <AnalyzingIndicator />}
           {status === "error" && error && <ErrorBanner message={error} onDismiss={() => setStatus("idle")} />}
-          {status === "ready" && media && <MediaCard media={media} mode={mode} />}
+          {status === "ready" && media?.kind === "media" && (
+            <MediaCard
+              media={media}
+              mode={mode}
+              shareable={shareable}
+              onOpenPlaylist={(playlistUrl) => {
+                setUrl(playlistUrl);
+                void runAnalysis(playlistUrl);
+              }}
+            />
+          )}
+          {status === "ready" && media?.kind === "playlist" && (
+            <PlaylistCard key={media.analysisId} playlist={media} mode={mode} shareable={shareable} />
+          )}
         </div>
       </main>
 

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Platform } from "../platform/types";
 
-export interface CachedAnalysis {
+export interface CachedMediaAnalysis {
+  kind: "media";
   id: string;
   url: string;
   platform: Platform;
@@ -12,6 +13,20 @@ export interface CachedAnalysis {
   hasAnyAudio: boolean;
   createdAt: number;
 }
+
+export interface CachedPlaylistAnalysis {
+  kind: "playlist";
+  id: string;
+  platform: Platform;
+  title: string;
+  /** Allowlist of downloadable entries: batch requests may only reference these. */
+  entries: Map<string, { url: string; title: string; index: number }>;
+  createdAt: number;
+}
+
+export type CachedAnalysis = CachedMediaAnalysis | CachedPlaylistAnalysis;
+
+type NewAnalysis = Omit<CachedMediaAnalysis, "id" | "createdAt"> | Omit<CachedPlaylistAnalysis, "id" | "createdAt">;
 
 const TTL_MS = 15 * 60 * 1000;
 
@@ -42,9 +57,9 @@ if (!cache.sweepIntervalStarted) {
   ).unref();
 }
 
-export function saveAnalysis(data: Omit<CachedAnalysis, "id" | "createdAt">): string {
+export function saveAnalysis(data: NewAnalysis): string {
   const id = randomUUID();
-  cache.store.set(id, { ...data, id, createdAt: Date.now() });
+  cache.store.set(id, { ...data, id, createdAt: Date.now() } as CachedAnalysis);
   return id;
 }
 

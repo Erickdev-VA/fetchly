@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAnalysis } from "@/lib/jobs/analysisCache";
-import { startDownloadJob, isServerBusy } from "@/lib/jobs/downloadJobs";
+import { startDownloadJob } from "@/lib/jobs/downloadJobs";
+import { isServerBusy } from "@/lib/jobs/capacity";
 import { checkRateLimit, getClientKey } from "@/lib/ratelimit";
 import { AppError } from "@/lib/errors";
 import { errorResponse } from "@/lib/http";
@@ -12,6 +13,7 @@ interface StartBody {
   analysisId?: unknown;
   mode?: unknown;
   height?: unknown;
+  shareable?: unknown;
 }
 
 export async function POST(request: Request) {
@@ -35,7 +37,7 @@ export async function POST(request: Request) {
     const mode = body.mode as DownloadMode;
 
     const analysis = getAnalysis(body.analysisId);
-    if (!analysis) throw new AppError("NOT_FOUND");
+    if (!analysis || analysis.kind !== "media") throw new AppError("NOT_FOUND");
 
     let height: number | "best" = "best";
     if (body.height !== undefined && body.height !== null && body.height !== "best") {
@@ -60,6 +62,8 @@ export async function POST(request: Request) {
       height,
       hasAudioOnlyStream: analysis.hasAudioOnlyStream,
       hasVideoOnlyStream: analysis.hasVideoOnlyStream,
+      // On unless the client explicitly opts out.
+      shareable: body.shareable !== false,
     });
 
     return NextResponse.json({ jobId }, { status: 202 });

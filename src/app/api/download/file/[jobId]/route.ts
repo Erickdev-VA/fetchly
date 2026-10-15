@@ -5,7 +5,7 @@ import path from "node:path";
 import { getJob, finalizeJob } from "@/lib/jobs/downloadJobs";
 import { sanitizeFilename } from "@/lib/security/filename";
 import { AppError } from "@/lib/errors";
-import { errorResponse } from "@/lib/http";
+import { contentDisposition, errorResponse } from "@/lib/http";
 
 export async function GET(_request: Request, context: { params: Promise<{ jobId: string }> }) {
   try {
@@ -20,7 +20,6 @@ export async function GET(_request: Request, context: { params: Promise<{ jobId:
     const ext = path.extname(job.fileName);
     const base = sanitizeFilename(job.title);
     const downloadName = `${base}${ext}`;
-    const asciiFallback = downloadName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'");
 
     const nodeStream = createReadStream(job.filePath);
     nodeStream.on("close", () => {
@@ -32,7 +31,7 @@ export async function GET(_request: Request, context: { params: Promise<{ jobId:
       status: 200,
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
+        "Content-Disposition": contentDisposition(downloadName),
         "Content-Length": String(stats.size),
         "Cache-Control": "no-store",
       },
