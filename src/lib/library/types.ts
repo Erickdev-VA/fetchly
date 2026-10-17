@@ -27,6 +27,8 @@ export interface LibraryItem {
   /** File name inside the thumbnails folder, if one was saved. */
   thumbnailFile: string | null;
   createdAt: number;
+  /** Size plus the first and last bytes, hashed: spots the same file imported twice. */
+  fingerprint: string | null;
 }
 
 /** A library item as the page sees it (GET /api/library). */

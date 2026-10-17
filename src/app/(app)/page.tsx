@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { UrlInputBar } from "@/components/UrlInputBar";
 import { ModeToggle } from "@/components/ModeToggle";
@@ -9,7 +9,7 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { MediaCard } from "@/components/MediaCard";
 import { PlaylistCard } from "@/components/PlaylistCard";
 import { ShareableToggle } from "@/components/ShareableToggle";
-import { analyzeUrl, ApiError } from "@/lib/api";
+import { analyzeUrl, ApiError, fetchSettings } from "@/lib/api";
 import { CATEGORY_LABEL, categoryForMode } from "@/lib/library/types";
 import type { AnalyzeResult, DownloadMode } from "@/lib/platform/types";
 
@@ -20,9 +20,22 @@ export default function DownloadPage() {
   const [mode, setMode] = useState<DownloadMode>("auto");
   const [status, setStatus] = useState<Status>("idle");
   const [shareable, setShareable] = useState(true);
+  const shareableTouched = useRef(false);
   const [media, setMedia] = useState<AnalyzeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+
+  // Start from the default chosen in Ajustes, unless the switch was already used.
+  useEffect(() => {
+    let live = true;
+    fetchSettings().then(
+      ({ settings }) => live && !shareableTouched.current && setShareable(settings.shareableDefault),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const runAnalysis = useCallback(async (candidate: string) => {
     const trimmed = candidate.trim();
@@ -79,7 +92,14 @@ export default function DownloadPage() {
           />
           <ModeToggle value={mode} onChange={setMode} disabled={isBusy} />
           <p className="text-xs text-white/40">Se guardará en {CATEGORY_LABEL[categoryForMode(mode)]}</p>
-          <ShareableToggle value={shareable} onChange={setShareable} disabled={isBusy} />
+          <ShareableToggle
+            value={shareable}
+            onChange={(value) => {
+              shareableTouched.current = true;
+              setShareable(value);
+            }}
+            disabled={isBusy}
+          />
           {pasteNotice && <p className="text-center text-xs text-white/40">{pasteNotice}</p>}
         </div>
 

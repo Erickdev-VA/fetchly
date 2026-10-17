@@ -180,3 +180,86 @@ export async function addToPlaylist(id: string, itemIds: string[]): Promise<numb
   );
   return added;
 }
+
+export interface AppSettings {
+  settings: { libraryDir: string | null; shareableDefault: boolean };
+  library: { path: string; isDefault: boolean };
+  version: string | null;
+}
+
+export function fetchSettings(): Promise<AppSettings> {
+  return fetch("/api/settings", { cache: "no-store" }).then((res) => parseJsonOrThrow<AppSettings>(res));
+}
+
+export async function setShareableDefault(value: boolean): Promise<void> {
+  await fetch("/api/settings", jsonInit("PATCH", { shareableDefault: value })).then((res) => parseJsonOrThrow(res));
+}
+
+export interface LibraryMove {
+  running: boolean;
+  from: string;
+  to: string;
+  totalFiles: number;
+  movedFiles: number;
+  totalBytes: number;
+  movedBytes: number;
+  failed: string[];
+  error: string | null;
+}
+
+export function moveLibrary(folder: string): Promise<{ move: LibraryMove }> {
+  return fetch("/api/settings/library-dir", jsonInit("POST", { folder })).then((res) =>
+    parseJsonOrThrow<{ move: LibraryMove }>(res),
+  );
+}
+
+export function fetchLibraryMove(): Promise<{ move: LibraryMove | null }> {
+  return fetch("/api/settings/library-dir", { cache: "no-store" }).then((res) =>
+    parseJsonOrThrow<{ move: LibraryMove | null }>(res),
+  );
+}
+
+export interface StorageUsage {
+  music: { bytes: number; files: number };
+  video: { bytes: number; files: number };
+  freeBytes: number | null;
+}
+
+export function fetchStorage(): Promise<StorageUsage> {
+  return fetch("/api/settings/storage", { cache: "no-store" }).then((res) => parseJsonOrThrow<StorageUsage>(res));
+}
+
+export function fetchYtDlpVersion(): Promise<{ version: string | null }> {
+  return fetch("/api/settings/ytdlp", { cache: "no-store" }).then((res) => parseJsonOrThrow<{ version: string | null }>(res));
+}
+
+export function updateYtDlp(): Promise<{ result: "updated" | "current" | "failed"; version: string | null }> {
+  return fetch("/api/settings/ytdlp", { method: "POST" }).then((res) =>
+    parseJsonOrThrow<{ result: "updated" | "current" | "failed"; version: string | null }>(res),
+  );
+}
+
+export interface ImportProgress {
+  id: string;
+  folder: string;
+  running: boolean;
+  total: number;
+  done: number;
+  imported: { music: number; video: number };
+  skipped: { name: string; reason: string }[];
+  ignored: number;
+  error: string | null;
+}
+
+export async function startImport(folder: string): Promise<string> {
+  const { id } = await fetch("/api/library/import", jsonInit("POST", { folder })).then((res) =>
+    parseJsonOrThrow<{ id: string }>(res),
+  );
+  return id;
+}
+
+export function fetchImport(id: string): Promise<ImportProgress> {
+  return fetch(`/api/library/import/${encodeURIComponent(id)}`, { cache: "no-store" }).then((res) =>
+    parseJsonOrThrow<ImportProgress>(res),
+  );
+}

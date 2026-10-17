@@ -43,7 +43,8 @@ const projectRoot = path.join(__dirname, "..");
 const serverDir = app.isPackaged ? path.join(process.resourcesPath, "server") : path.join(projectRoot, "dist-desktop", "server");
 
 const dataDir = app.getPath("userData");
-const libraryDir = path.join(app.getPath("documents"), profileName);
+const defaultLibraryDir = path.join(app.getPath("documents"), profileName);
+const settingsPath = path.join(dataDir, "settings.json");
 // Keep in sync with src/lib/library/paths.ts.
 const CATEGORY_DIRS = { music: "Música", video: "Videos" };
 
@@ -83,7 +84,8 @@ function serverEnv() {
     // to the whole local network.
     HOSTNAME: HOST,
     FETCHLY_DATA_DIR: dataDir,
-    FETCHLY_LIBRARY_DIR: libraryDir,
+    FETCHLY_LIBRARY_DIR: defaultLibraryDir,
+    FETCHLY_VERSION: app.getVersion(),
   };
 }
 
@@ -523,17 +525,45 @@ function fromApp(event) {
   return event.senderFrame?.url?.startsWith(APP_ORIGIN) ?? false;
 }
 
+/**
+ * The library folder: the one chosen in Ajustes (the server writes it to
+ * settings.json, see src/lib/settings.ts) or Documentos\Fetchly. Read on
+ * every call, so a move made by the server applies right away.
+ */
+function libraryDir() {
+  try {
+    const { libraryDir: chosen } = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    if (typeof chosen === "string" && path.isAbsolute(chosen)) return chosen;
+  } catch {
+    // no settings yet
+  }
+  return defaultLibraryDir;
+}
+
 function insideLibrary(filePath) {
   if (typeof filePath !== "string" || !path.isAbsolute(filePath)) return false;
-  const relative = path.relative(libraryDir, path.resolve(filePath));
+  const relative = path.relative(libraryDir(), path.resolve(filePath));
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
+// "root" opens the library folder itself (Ajustes).
 ipcMain.handle("library:open-folder", async (event, category) => {
-  if (!fromApp(event) || !Object.hasOwn(CATEGORY_DIRS, category)) return false;
-  const dir = path.join(libraryDir, CATEGORY_DIRS[category]);
+  if (!fromApp(event) || (category !== "root" && !Object.hasOwn(CATEGORY_DIRS, category))) return false;
+  const dir = category === "root" ? libraryDir() : path.join(libraryDir(), CATEGORY_DIRS[category]);
   fs.mkdirSync(dir, { recursive: true });
   return (await shell.openPath(dir)) === "";
+});
+
+/** Ajustes: the folder picker for "Cambiar…" and "Importar carpeta". Resolves to the path, or null if cancelled. */
+ipcMain.handle("dialog:choose-folder", async (event, purpose) => {
+  if (!fromApp(event) || event.sender !== mainWindow?.webContents) return null;
+  const titles = { library: "Elige dónde guardar la biblioteca", import: "Elige la carpeta que quieres importar" };
+  if (!Object.hasOwn(titles, purpose)) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: titles[purpose],
+    properties: ["openDirectory", ...(purpose === "library" ? ["createDirectory"] : [])],
+  });
+  return result.canceled ? null : (result.filePaths[0] ?? null);
 });
 
 ipcMain.handle("library:show-item", (event, filePath) => {

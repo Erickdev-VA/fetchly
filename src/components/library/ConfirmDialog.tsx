@@ -9,12 +9,15 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel,
+  tone = "danger",
   onConfirm,
   onCancel,
 }: {
   title: string;
   message: string;
   confirmLabel: string;
+  /** "primary" for a question that isn't about deleting something. */
+  tone?: "danger" | "primary";
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -46,7 +49,9 @@ export function ConfirmDialog({
         <button
           type="button"
           onClick={onConfirm}
-          className="rounded-xl bg-red-500/90 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+          className={`rounded-xl px-3.5 py-2 text-sm font-semibold text-white transition ${
+            tone === "danger" ? "bg-red-500/90 hover:bg-red-500" : "bg-[var(--accent)] hover:brightness-110"
+          }`}
         >
           {confirmLabel}
         </button>

@@ -4,7 +4,10 @@ import type { PlayerCommand, PlayerSnapshot } from "./player/types";
 /** What electron/preload.cjs exposes as `window.fetchly`. */
 interface FetchlyBridge {
   isDesktop: true;
-  openLibraryFolder(category: Category): Promise<boolean>;
+  /** "root" opens the library folder itself. */
+  openLibraryFolder(category: Category | "root"): Promise<boolean>;
+  /** Folder picker for Ajustes; resolves to the chosen path, or null if cancelled. */
+  chooseFolder(purpose: "library" | "import"): Promise<string | null>;
   showItemInFolder(filePath: string): Promise<boolean>;
   /** True once the file is in the Recycle Bin or was already gone. */
   trashItem(filePath: string): Promise<boolean>;

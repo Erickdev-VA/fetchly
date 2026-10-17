@@ -3,6 +3,7 @@ import { copyFile, mkdir, open, rename, rm, stat, unlink, writeFile } from "node
 import path from "node:path";
 import { categoryDir, thumbnailsDir } from "./paths";
 import { insertItem } from "./items";
+import { fileFingerprint } from "./fingerprint";
 import type { Category, LibraryItem } from "./types";
 import { safeFileStem } from "../security/filename";
 import { probeMedia } from "../ytdlp/postprocess";
@@ -22,7 +23,7 @@ const THUMBNAIL_EXT_BY_TYPE: Record<string, string> = {
  * "Title (2).m4a" and so on. Creating it exclusively (`wx`) is what makes two
  * downloads finishing at the same moment unable to pick the same name.
  */
-async function reserveFileName(dir: string, stem: string, ext: string): Promise<string> {
+export async function reserveFileName(dir: string, stem: string, ext: string): Promise<string> {
   for (let n = 1; ; n++) {
     const candidate = path.join(dir, n === 1 ? `${stem}${ext}` : `${stem} (${n})${ext}`);
     try {
@@ -35,7 +36,7 @@ async function reserveFileName(dir: string, stem: string, ext: string): Promise<
 }
 
 /** Moves a file onto `dest` (which may exist), across drives if needed. */
-async function moveFile(src: string, dest: string): Promise<void> {
+export async function moveFile(src: string, dest: string): Promise<void> {
   try {
     await rename(src, dest);
   } catch (err) {
@@ -115,10 +116,11 @@ export async function addDownloadToLibrary(download: NewDownload): Promise<Libra
   }
 
   try {
-    const [{ size }, thumbnailFile, durationSeconds] = await Promise.all([
+    const [{ size }, thumbnailFile, durationSeconds, fingerprint] = await Promise.all([
       stat(filePath),
       saveThumbnail(id, download.thumbnailUrl),
       download.durationSeconds ?? probeMedia(filePath).then((p) => p.durationSeconds),
+      fileFingerprint(filePath).catch(() => null),
     ]);
 
     const item: LibraryItem = {
@@ -133,6 +135,7 @@ export async function addDownloadToLibrary(download: NewDownload): Promise<Libra
       fileSize: size,
       thumbnailFile,
       createdAt: Date.now(),
+      fingerprint,
     };
     insertItem(item);
     return item;

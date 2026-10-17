@@ -38,6 +38,9 @@ const MIGRATIONS: string[] = [
      PRIMARY KEY (playlist_id, item_id)
    );
    CREATE INDEX playlist_items_item ON playlist_items (item_id);`,
+  // Lets "Importar carpeta" recognise a file that's already in the library.
+  `ALTER TABLE items ADD COLUMN fingerprint TEXT;
+   CREATE INDEX items_fingerprint ON items (fingerprint);`,
 ];
 
 // See the comment in lib/jobs/downloadJobs.ts about pinning state to globalThis.

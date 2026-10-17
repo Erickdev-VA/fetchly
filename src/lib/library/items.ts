@@ -15,6 +15,7 @@ export interface ItemRow {
   file_size: number;
   thumbnail_file: string | null;
   created_at: number;
+  fingerprint: string | null;
 }
 
 export function fromRow(row: ItemRow): LibraryItem {
@@ -30,6 +31,7 @@ export function fromRow(row: ItemRow): LibraryItem {
     fileSize: row.file_size,
     thumbnailFile: row.thumbnail_file,
     createdAt: row.created_at,
+    fingerprint: row.fingerprint,
   };
 }
 
@@ -55,8 +57,8 @@ export function insertItem(item: LibraryItem): void {
   getDb()
     .prepare(
       `INSERT INTO items (id, category, title, artist, duration_seconds, platform, source_url,
-                          file_path, file_size, thumbnail_file, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          file_path, file_size, thumbnail_file, created_at, fingerprint)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       item.id,
@@ -70,7 +72,30 @@ export function insertItem(item: LibraryItem): void {
       item.fileSize,
       item.thumbnailFile,
       item.createdAt,
+      item.fingerprint,
     );
+  revisionState.count++;
+}
+
+/** Every item, oldest first (moving the library, filling in fingerprints). */
+export function listAllItems(): LibraryItem[] {
+  const rows = getDb().prepare("SELECT * FROM items ORDER BY created_at").all() as unknown as ItemRow[];
+  return rows.map(fromRow);
+}
+
+/** The item whose file has this fingerprint, if any (to skip importing the same file twice). */
+export function findByFingerprint(fingerprint: string): LibraryItem | null {
+  const row = getDb().prepare("SELECT * FROM items WHERE fingerprint = ? LIMIT 1").get(fingerprint) as ItemRow | undefined;
+  return row ? fromRow(row) : null;
+}
+
+export function setFingerprint(id: string, fingerprint: string): void {
+  getDb().prepare("UPDATE items SET fingerprint = ? WHERE id = ?").run(fingerprint, id);
+}
+
+/** After the library folder moved. */
+export function setFilePath(id: string, filePath: string): void {
+  getDb().prepare("UPDATE items SET file_path = ? WHERE id = ?").run(filePath, id);
   revisionState.count++;
 }
 

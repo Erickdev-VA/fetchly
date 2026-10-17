@@ -5,10 +5,12 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("fetchly", {
   isDesktop: true,
-  /** Opens Documentos\Fetchly\Música or \Videos in Explorer. */
+  /** Opens the library's Música or Videos folder ("root": the library folder itself) in Explorer. */
   openLibraryFolder: (category) => ipcRenderer.invoke("library:open-folder", category),
   /** Opens Explorer with the file selected. */
   showItemInFolder: (filePath) => ipcRenderer.invoke("library:show-item", filePath),
+  /** Folder picker for Ajustes ("library" or "import"); resolves to the path or null. */
+  chooseFolder: (purpose) => ipcRenderer.invoke("dialog:choose-folder", purpose),
   /** Sends a library file to the Recycle Bin. */
   trashItem: (filePath) => ipcRenderer.invoke("library:trash-item", filePath),
   player: {

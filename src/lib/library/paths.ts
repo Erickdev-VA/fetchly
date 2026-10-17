@@ -1,19 +1,25 @@
 import os from "node:os";
 import path from "node:path";
 import type { Category } from "./types";
+import { getSettings } from "../settings";
 
 // Keep in sync with CATEGORY_DIRS in electron/main.cjs.
-const CATEGORY_DIR_NAMES: Record<Category, string> = {
+export const CATEGORY_DIR_NAMES: Record<Category, string> = {
   music: "Música",
   video: "Videos",
 };
 
-/**
- * Documentos\Fetchly, where the user's files go. Electron passes the real
- * Documents folder (which may be redirected to OneDrive); the fallback is
- * only for running the server on its own.
- */
+/** Where the user's files go: the folder chosen in Ajustes, or else Documentos\Fetchly. */
 export function libraryRoot(): string {
+  return getSettings().libraryDir ?? defaultLibraryRoot();
+}
+
+/**
+ * Documentos\Fetchly. Electron passes the real Documents folder (which may
+ * be redirected to OneDrive); the fallback is only for running the server
+ * on its own.
+ */
+export function defaultLibraryRoot(): string {
   return process.env.FETCHLY_LIBRARY_DIR ?? path.join(os.homedir(), "Documents", "Fetchly");
 }
 
