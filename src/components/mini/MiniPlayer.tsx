@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { libraryThumbnailUrl } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
 import type { PlayerCommand, PlayerSnapshot } from "@/lib/player/types";
@@ -18,7 +19,7 @@ const CARD_MIN_HEIGHT = 150;
 const SPLITTER_WIDTH = 12;
 const TITLE_MIN_WIDTH = 56;
 // The space the handle frees shows the progress bar, once it's this wide.
-const PROGRESS_MIN_WIDTH = 80;
+const PROGRESS_MIN_WIDTH = 52;
 
 // Widths in the bar, in px, matching the classes below; they decide which
 // controls fit. Bar: pl-2 pr-1.5, gap-2 between its four parts.
@@ -29,7 +30,9 @@ const COVER_MAX = 72;
 const BUTTON = 28; // h-7 w-7
 const PLAY = 36; // h-9 w-9
 const CONTROL_GAP = 4; // gap-1
-const VOLUME_SLIDER = 72;
+const VOLUME_SLIDER = 56; // w-14
+// Narrower than that, the slider still shows when the handle leaves it this much room.
+const VOLUME_SLIDER_MIN = 36;
 const EXPAND = 24;
 
 /** What the bar shows, from everything down to the bare minimum. */
@@ -100,12 +103,50 @@ function controlsWidth(c: BarControls): number {
   return groups.reduce((sum, w) => sum + w, 0) + (groups.length - 1) * BAR_GAP;
 }
 
+/** ⏮ ⏯ ⏭ beside the title: the least the bar gives the controls while it shows a title. */
+const TITLE_AND_TRANSPORT = BAR_LEVELS[BAR_LEVELS.length - 2];
+
+/** Width for the title area and the controls together (with the gap between them). */
+function barSpace(width: number, height: number): number {
+  const cover = Math.min(COVER_MAX, height - 16);
+  return width - BAR_PADDING - GRIP_COLUMN - cover - 2 * BAR_GAP;
+}
+
 /** The most that fits beside the cover (and the title at its shortest). */
 function barControls(width: number, height: number): BarControls {
-  const cover = Math.min(COVER_MAX, height - 16);
-  const base = width - BAR_PADDING - GRIP_COLUMN - cover - 2 * BAR_GAP;
+  const base = barSpace(width, height);
   const room = (c: BarControls) => (c.title ? base - BAR_GAP - TITLE_MIN_WIDTH - SPLITTER_WIDTH : base);
   return BAR_LEVELS.find((level) => controlsWidth(level) <= room(level)) ?? BAR_LEVELS[BAR_LEVELS.length - 1];
+}
+
+/**
+ * How the bar splits its width. With no title width chosen, the controls
+ * come first and the title takes the rest. Once the handle sets one, the
+ * title keeps it and the controls get what's left: as many as fit, in the
+ * same order as when the window narrows (⏮ ⏯ ⏭ always), and any room past
+ * them holds the progress bar.
+ */
+function barLayout(width: number, height: number, chosenTitle: number | null) {
+  const space = barSpace(width, height);
+  const auto = barControls(width, height);
+  // The handle can push the controls back down to ⏮ ⏯ ⏭, never further.
+  const maxTitle = Math.max(TITLE_MIN_WIDTH, space - BAR_GAP - controlsWidth(TITLE_AND_TRANSPORT) - SPLITTER_WIDTH);
+  if (!auto.title || chosenTitle === null) {
+    const title = Math.max(TITLE_MIN_WIDTH, space - BAR_GAP - controlsWidth(auto) - SPLITTER_WIDTH);
+    return { controls: auto, title, maxTitle, middle: 0, volumeSlider: VOLUME_SLIDER };
+  }
+  const title = Math.min(maxTitle, Math.max(TITLE_MIN_WIDTH, chosenTitle));
+  const room = space - BAR_GAP - SPLITTER_WIDTH - title;
+  let controls = BAR_LEVELS.find((level) => level.title && controlsWidth(level) <= room) ?? TITLE_AND_TRANSPORT;
+  let middle = Math.max(0, room - controlsWidth(controls));
+  // Room short of a full volume slider still fits a shorter one, so no gap is left empty.
+  let volumeSlider = VOLUME_SLIDER;
+  if (controls.volume && !controls.volumeSlider && middle >= CONTROL_GAP + VOLUME_SLIDER_MIN) {
+    volumeSlider = Math.min(VOLUME_SLIDER, middle - CONTROL_GAP);
+    controls = { ...controls, volumeSlider: true };
+    middle -= CONTROL_GAP + volumeSlider;
+  }
+  return { controls, title, maxTitle, middle, volumeSlider };
 }
 const TITLE_WIDTH_KEY = "fetchly.mini.titleWidth";
 
@@ -121,19 +162,6 @@ const serverSizeSnapshot = () => "480x96";
 function useWindowSize() {
   const [width, height] = useSyncExternalStore(subscribeToSize, sizeSnapshot, serverSizeSnapshot).split("x").map(Number);
   return { width, height };
-}
-
-/** The element's width, kept current as it resizes. */
-function useElementWidth(ref: RefObject<HTMLElement | null>) {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [ref]);
-  return width;
 }
 
 // --- the mirrored player state ----------------------------------------------
@@ -249,25 +277,67 @@ function PlayButton({ player, big }: { player: PlayerSnapshot | null; big?: bool
   );
 }
 
-/** 🔀: shuffled, or in the order of the list. Accent-colored with a dot while on, like the main bar's. */
-function ShuffleButton({ player, big }: { player: PlayerSnapshot | null; big?: boolean }) {
-  const on = player?.shuffle ?? false;
-  const label = on ? "Desactivar aleatorio" : "Aleatorio";
+/** A button that stays on (🔀, 🔁): accent-colored with a dot while on, like the main bar's. */
+function ModeButton({
+  icon,
+  label,
+  on,
+  disabled,
+  onClick,
+  big,
+}: {
+  icon: PlayerIconName;
+  label: string;
+  on: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  big?: boolean;
+}) {
   return (
     <button
       type="button"
       title={label}
       aria-label={label}
       aria-pressed={on}
-      disabled={!player?.track}
-      onClick={() => send({ type: "toggleShuffle" })}
+      disabled={disabled}
+      onClick={onClick}
       className={`no-drag relative flex shrink-0 items-center justify-center rounded-full outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60 disabled:cursor-default disabled:opacity-30 ${
         big ? "h-10 w-10" : "h-7 w-7"
       } ${on ? "text-[var(--accent)]" : "text-white/70 enabled:hover:text-white"}`}
     >
-      <PlayerIcon name="shuffle" size={big ? 19 : 15} />
+      <PlayerIcon name={icon} size={big ? 19 : 15} />
       {on && <span className={`absolute h-1 w-1 rounded-full bg-[var(--accent)] ${big ? "bottom-0.5" : "-bottom-0.5"}`} />}
     </button>
+  );
+}
+
+/** 🔀: shuffled, or in the order of the list. */
+function ShuffleButton({ player, big }: { player: PlayerSnapshot | null; big?: boolean }) {
+  const on = player?.shuffle ?? false;
+  return (
+    <ModeButton
+      icon="shuffle"
+      label={on ? "Desactivar aleatorio" : "Aleatorio"}
+      on={on}
+      disabled={!player?.track}
+      onClick={() => send({ type: "toggleShuffle" })}
+      big={big}
+    />
+  );
+}
+
+/** 🔁: off → the whole list → this song → off, as in the main bar. */
+function RepeatButton({ player, big }: { player: PlayerSnapshot | null; big?: boolean }) {
+  const repeat = player?.repeat ?? "off";
+  return (
+    <ModeButton
+      icon={repeat === "one" ? "repeat-one" : "repeat"}
+      label={repeat === "off" ? "Repetir todas" : repeat === "all" ? "Repetir una" : "No repetir"}
+      on={repeat !== "off"}
+      disabled={!player?.track}
+      onClick={() => send({ type: "cycleRepeat" })}
+      big={big}
+    />
   );
 }
 
@@ -343,9 +413,9 @@ function Grip({ vertical }: { vertical?: boolean }) {
   );
 }
 
-function Progress({ player, position, withTimes }: { player: PlayerSnapshot | null; position: number; withTimes?: boolean }) {
+function Progress({ player, position }: { player: PlayerSnapshot | null; position: number }) {
   const duration = player?.duration ?? 0;
-  const slider = (
+  return (
     <Slider
       value={position}
       max={duration}
@@ -356,41 +426,42 @@ function Progress({ player, position, withTimes }: { player: PlayerSnapshot | nu
       className="no-drag min-w-0 flex-1"
     />
   );
-  if (!withTimes) return slider;
-  return (
-    <div className="flex w-full items-center gap-2 text-[10px] tabular-nums text-white/70">
-      <span>{formatDuration(player?.track ? position : 0) ?? "0:00"}</span>
-      {slider}
-      <span>{formatDuration(player?.track ? duration : 0) ?? "0:00"}</span>
-    </div>
-  );
+}
+
+function volumeIcon(player: PlayerSnapshot | null): PlayerIconName {
+  const volume = player?.volume ?? 1;
+  return player?.muted || volume === 0 ? "volume-off" : volume < 0.5 ? "volume-low" : "volume";
 }
 
 function Volume({
   player,
-  sliderClassName = "w-[72px]",
+  sliderClassName = "w-14",
+  sliderWidth,
   withSlider = true,
 }: {
   player: PlayerSnapshot | null;
   sliderClassName?: string;
+  /** In px, instead of sliderClassName's width. */
+  sliderWidth?: number;
   /** Without it, just the speaker (a click mutes). */
   withSlider?: boolean;
 }) {
   const volume = player?.volume ?? 1;
   const muted = player?.muted ?? false;
-  const icon: PlayerIconName = muted || volume === 0 ? "volume-off" : volume < 0.5 ? "volume-low" : "volume";
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <Button icon={icon} label={muted ? "Activar sonido" : "Silenciar"} onClick={() => send({ type: "toggleMute" })} />
+      <Button icon={volumeIcon(player)} label={muted ? "Activar sonido" : "Silenciar"} onClick={() => send({ type: "toggleMute" })} />
       {withSlider && (
-        <Slider
-          value={muted ? 0 : volume}
-          max={1}
-          onCommit={(value) => send({ type: "volume", volume: value })}
-          label="Volumen"
-          valueText={`${Math.round((muted ? 0 : volume) * 100)}%`}
-          className={`no-drag ${sliderClassName}`}
-        />
+        <div className={`flex shrink-0 ${sliderWidth === undefined ? sliderClassName : ""}`} style={sliderWidth === undefined ? undefined : { width: sliderWidth }}>
+          <Slider
+            value={muted ? 0 : volume}
+            max={1}
+            onCommit={(value) => send({ type: "volume", volume: value })}
+            label="Volumen"
+            valueText={`${Math.round((muted ? 0 : volume) * 100)}%`}
+            className="no-drag w-full"
+          />
+        </div>
       )}
     </div>
   );
@@ -485,9 +556,9 @@ function Splitter({ value, max, onChange }: { value: number; max: number; onChan
         }
       }}
       style={{ width: SPLITTER_WIDTH }}
-      className="no-drag group/split flex h-10 shrink-0 cursor-col-resize items-center justify-center outline-none"
+      className="no-drag group/split flex h-full max-h-10 shrink-0 cursor-col-resize items-center justify-center outline-none"
     >
-      <span className="h-9 w-[3px] rounded-full bg-white/15 transition group-hover/split:bg-white/50 group-focus-visible/split:bg-[var(--accent)]" />
+      <span className="h-[calc(100%-4px)] max-h-9 w-[3px] rounded-full bg-white/15 transition group-hover/split:bg-white/50 group-focus-visible/split:bg-[var(--accent)]" />
     </div>
   );
 }
@@ -496,19 +567,14 @@ function Splitter({ value, max, onChange }: { value: number; max: number; onChan
 
 /**
  * Short window: ● ⠿ | cover · title ┃ (progress) | 🔀 ⏮ ⏯ ⏭ | 🔊 ━━ | ⤢,
- * like Spotify's. The controls come first; the handle ┃ sets how much of
- * the title shows, and the room that frees in the middle holds the
- * progress bar once it's wide enough.
+ * like Spotify's. The handle ┃ splits the width between the title and the
+ * controls (see barLayout): dragged left it brings controls back, then the
+ * progress bar; dragged right it takes them away. Double click: automatic.
  */
 function Bar({ player, position, width, height }: { player: PlayerSnapshot | null; position: number; width: number; height: number }) {
-  const regionRef = useRef<HTMLDivElement>(null);
-  const regionWidth = useElementWidth(regionRef);
   const [savedTitleWidth, setSavedTitleWidth] = useState<number | null>(readTitleWidth);
-  const controls = barControls(width, height);
-
-  const maxTitle = Math.max(TITLE_MIN_WIDTH, regionWidth - SPLITTER_WIDTH);
-  const titleWidth = savedTitleWidth === null ? maxTitle : Math.min(maxTitle, Math.max(TITLE_MIN_WIDTH, savedTitleWidth));
-  const middle = Math.max(0, regionWidth - SPLITTER_WIDTH - titleWidth);
+  const { controls, title: titleWidth, maxTitle, middle, volumeSlider } = barLayout(width, height, savedTitleWidth);
+  // The middle has pl-1 pr-1.
   const showProgress = middle >= PROGRESS_MIN_WIDTH + 8;
 
   return (
@@ -520,7 +586,7 @@ function Bar({ player, position, width, height }: { player: PlayerSnapshot | nul
       <div className="no-drag aspect-square h-full max-h-[72px] shrink-0" onDoubleClick={showApp} title="Doble clic: abrir Pista">
         <Cover player={player} className="h-full w-full rounded-md" />
       </div>
-      <div ref={regionRef} className="flex min-w-0 flex-1 items-center">
+      <div className="flex h-full min-w-0 flex-1 items-center">
         {controls.title && (
           <>
             <div style={{ width: titleWidth }} className="min-w-0 shrink-0">
@@ -531,10 +597,8 @@ function Bar({ player, position, width, height }: { player: PlayerSnapshot | nul
                 value={titleWidth}
                 max={maxTitle}
                 onChange={(value, done) => {
-                  // Pulled all the way right: back to "the whole title", so it follows the window's width again.
-                  const next = value !== null && value >= maxTitle - 1 ? null : value;
-                  setSavedTitleWidth(next);
-                  if (done) saveTitleWidth(next);
+                  setSavedTitleWidth(value);
+                  if (done) saveTitleWidth(value);
                 }}
               />
             )}
@@ -546,7 +610,7 @@ function Bar({ player, position, width, height }: { player: PlayerSnapshot | nul
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Transport player={player} withShuffle={controls.shuffle} />
-        {controls.volume && <Volume player={player} withSlider={controls.volumeSlider} />}
+        {controls.volume && <Volume player={player} withSlider={controls.volumeSlider} sliderWidth={volumeSlider} />}
         {controls.expand && <Button icon="expand" label="Abrir Pista" size={14} className="h-6 w-6" onClick={showApp} />}
       </div>
     </div>
@@ -554,12 +618,164 @@ function Bar({ player, position, width, height }: { player: PlayerSnapshot | nul
 }
 
 /**
- * Tall window: ● ⠿ ⤢ on top, the cover filling the rest and the title
- * under it. Hovering the cover brings up the controls over it.
+ * The cover's average color, leaning to its most colorful pixels and
+ * darkened so white text stays readable on it: the card's backdrop, like
+ * Spotify's. Null until it's read (and for songs without a cover).
+ */
+function useCoverColor(id: string | null, hasThumbnail: boolean): string | null {
+  const [color, setColor] = useState<{ id: string; value: string } | null>(null);
+  useEffect(() => {
+    if (!id || !hasThumbnail) return;
+    let live = true;
+    const image = new Image();
+    image.onload = () => {
+      if (!live) return;
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 16;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) return;
+        context.drawImage(image, 0, 0, 16, 16);
+        const data = context.getImageData(0, 0, 16, 16).data;
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        let total = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const weight = 1 + (Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2])) / 24;
+          r += data[i] * weight;
+          g += data[i + 1] * weight;
+          b += data[i + 2] * weight;
+          total += weight;
+        }
+        const peak = Math.max(r, g, b, 1) / total;
+        const k = Math.min(0.8, 130 / peak) / total;
+        setColor({ id, value: `rgb(${Math.round(r * k)} ${Math.round(g * k)} ${Math.round(b * k)})` });
+      } catch {
+        // Only a backdrop: the plain one stays.
+      }
+    };
+    image.src = libraryThumbnailUrl(id);
+    return () => {
+      live = false;
+    };
+  }, [id, hasThumbnail]);
+  return color && color.id === id ? color.value : null;
+}
+
+// The card's row of controls: 🔊 🔀 ⏮ ⏯ ⏭ 🔁, big or small (px, matching the classes).
+const CARD_BUTTON = { big: 40, small: 28 };
+const CARD_PLAY = { big: 48, small: 36 };
+const CARD_GAP = { big: 12, small: 8 };
+
+interface CardRow {
+  big: boolean;
+  volume: boolean;
+  shuffle: boolean;
+  repeat: boolean;
+}
+// Narrower takes away 🔁, then 🔊, then 🔀; ⏮ ⏯ ⏭ always stay.
+const CARD_LEVELS = [
+  { volume: true, shuffle: true, repeat: true },
+  { volume: true, shuffle: true, repeat: false },
+  { volume: false, shuffle: true, repeat: false },
+  { volume: false, shuffle: false, repeat: false },
+];
+
+/** The biggest, fullest row that fits across the panel (with 12 px each side). */
+function cardRow(panelWidth: number): CardRow {
+  for (const big of [true, false]) {
+    const size = big ? "big" : "small";
+    for (const level of CARD_LEVELS) {
+      const buttons = 2 + Number(level.volume) + Number(level.shuffle) + Number(level.repeat);
+      if (buttons * CARD_BUTTON[size] + CARD_PLAY[size] + buttons * CARD_GAP[size] <= panelWidth - 24) return { big, ...level };
+    }
+  }
+  return { big: false, ...CARD_LEVELS[CARD_LEVELS.length - 1] };
+}
+
+/** 🔊 in the card: a click mutes; resting on it shows the volume slider above. */
+function CardVolume({ player, big }: { player: PlayerSnapshot | null; big: boolean }) {
+  const volume = player?.volume ?? 1;
+  const muted = player?.muted ?? false;
+  return (
+    <div className="group/vol relative flex shrink-0">
+      <Button
+        icon={volumeIcon(player)}
+        label={muted ? "Activar sonido" : "Silenciar"}
+        size={big ? 20 : 16}
+        className={big ? "h-10 w-10" : "h-7 w-7"}
+        onClick={() => send({ type: "toggleMute" })}
+      />
+      {/* pb-1.5 rather than a margin, so the pointer doesn't drop out on its way up. */}
+      <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-1.5 opacity-0 transition-opacity group-focus-within/vol:pointer-events-auto group-focus-within/vol:opacity-100 group-hover/vol:pointer-events-auto group-hover/vol:opacity-100">
+        <div className="rounded-full bg-black/85 px-3 py-2 shadow-lg">
+          <Slider
+            value={muted ? 0 : volume}
+            max={1}
+            onCommit={(value) => send({ type: "volume", volume: value })}
+            label="Volumen"
+            valueText={`${Math.round((muted ? 0 : volume) * 100)}%`}
+            className="no-drag w-20"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CardControls({ player, row }: { player: PlayerSnapshot | null; row: CardRow }) {
+  const iconSize = row.big ? 22 : 16;
+  const buttonClass = row.big ? "h-10 w-10" : "h-7 w-7";
+  return (
+    <div className={`flex items-center ${row.big ? "gap-3" : "gap-2"}`}>
+      {row.volume && <CardVolume player={player} big={row.big} />}
+      {row.shuffle && <ShuffleButton player={player} big={row.big} />}
+      <Button
+        icon="previous"
+        label="Anterior"
+        size={iconSize}
+        className={buttonClass}
+        disabled={!player?.hasPrevious}
+        onClick={() => send({ type: "previous" })}
+      />
+      <PlayButton player={player} big={row.big} />
+      <Button icon="next" label="Siguiente" size={iconSize} className={buttonClass} disabled={!player?.hasNext} onClick={() => send({ type: "next" })} />
+      {row.repeat && <RepeatButton player={player} big={row.big} />}
+    </div>
+  );
+}
+
+// Under the panel: the title (one line) and the artist.
+const CARD_TITLES_HEIGHT = 46;
+
+function CardTitles({ player, big }: { player: PlayerSnapshot | null; big: boolean }) {
+  const track = player?.track;
+  if (!track) return <p className="truncate text-sm font-medium text-white/35">Nada en reproducción</p>;
+  return (
+    <div className="min-w-0">
+      <Marquee text={track.title} className={`font-bold leading-snug text-white ${big ? "text-[17px]" : "text-[14px]"}`} />
+      {track.artist && <Marquee text={track.artist} className={`leading-snug text-white/55 ${big ? "text-[13px]" : "text-[12px]"}`} />}
+    </div>
+  );
+}
+
+/**
+ * Tall window, after Spotify's: ● ⠿ ⤢ on top, then a panel tinted with the
+ * cover's color and the cover on it, and the title and artist under it.
+ * Resting on the panel darkens it and brings up one centered row of
+ * controls, with the progress bar and its times along the bottom.
  */
 function Card({ player, position, width, height }: { player: PlayerSnapshot | null; position: number; width: number; height: number }) {
-  // As big as fits under the top strip and above the titles (~96 px of them).
-  const side = Math.max(48, Math.min(width - 16, height - 96));
+  const track = player?.track ?? null;
+  const tint = useCoverColor(track?.id ?? null, track?.hasThumbnail ?? false);
+  // p-2, the 20 px top strip and the titles, with gap-2 between the three.
+  const panelWidth = width - 16;
+  const panelHeight = height - 16 - 20 - CARD_TITLES_HEIGHT - 16;
+  // A margin all round, a little more at the sides, like Spotify's.
+  const side = Math.max(40, Math.min(panelWidth - 56, panelHeight - 40));
+  const row = cardRow(panelWidth);
+  const duration = player?.duration ?? 0;
   return (
     <div className="flex h-full flex-col gap-2 p-2">
       <div className="relative flex h-5 shrink-0 items-center justify-between px-0.5">
@@ -569,31 +785,37 @@ function Card({ player, position, width, height }: { player: PlayerSnapshot | nu
         </div>
         <Button icon="expand" label="Abrir Pista" size={13} className="h-5 w-5" onClick={showApp} />
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center">
-        <div
-          style={{ width: side, height: side }}
-          className="no-drag group/cover relative overflow-hidden rounded-lg"
-          title="Doble clic: abrir Pista"
-          onDoubleClick={(e) => {
-            // Not when double-clicking a control on top of it.
-            if (!(e.target as HTMLElement).closest("button, input")) showApp();
-          }}
-        >
-          <Cover player={player} className="h-full w-full" />
-          {player?.track && (
-            <div className="absolute inset-0 flex flex-col justify-between bg-black/60 p-3 opacity-0 transition-opacity group-focus-within/cover:opacity-100 group-hover/cover:opacity-100">
-              <div className="flex justify-end">{side >= 160 && <Volume player={player} sliderClassName="w-14 mr-1" />}</div>
-              <div className="flex justify-center">
-                {/* With 🔀 the big buttons need ~210 px; below 160 px there's only room for ⏮ ⏯ ⏭. */}
-                <Transport player={player} big={side >= 230} withShuffle={side >= 160} />
-              </div>
-              <Progress player={player} position={position} withTimes={side >= 160} />
-            </div>
-          )}
+      <div
+        style={{ backgroundColor: tint ?? "rgb(38 38 42)" }}
+        className="no-drag group/cover relative min-h-0 flex-1 overflow-hidden rounded-lg transition-colors duration-700"
+        title="Doble clic: abrir Pista"
+        onDoubleClick={(e) => {
+          // Not when double-clicking a control on top of it.
+          if (!(e.target as HTMLElement).closest("button, input, [role='slider']")) showApp();
+        }}
+      >
+        <div className="flex h-full items-center justify-center">
+          <div style={{ width: side, height: side }} className="overflow-hidden rounded-md shadow-xl shadow-black/50">
+            <Cover player={player} className="h-full w-full" />
+          </div>
         </div>
+        {track && (
+          <div className="absolute inset-0 flex flex-col bg-black/55 px-3 pb-3 opacity-0 transition-opacity group-focus-within/cover:opacity-100 group-hover/cover:opacity-100">
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <CardControls player={player} row={row} />
+            </div>
+            <div className="mb-1.5 flex justify-between text-[11px] tabular-nums text-white/80">
+              <span>{formatDuration(position) ?? "0:00"}</span>
+              <span>{formatDuration(duration) ?? "0:00"}</span>
+            </div>
+            <div className="flex">
+              <Progress player={player} position={position} />
+            </div>
+          </div>
+        )}
       </div>
-      <div className="shrink-0 px-1 pb-1" style={{ minHeight: 36 }}>
-        <Titles player={player} />
+      <div className="shrink-0 overflow-hidden px-1" style={{ height: CARD_TITLES_HEIGHT }}>
+        <CardTitles player={player} big={width >= 260} />
       </div>
     </div>
   );

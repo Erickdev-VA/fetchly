@@ -378,7 +378,8 @@ ipcMain.on("player:state", (event, value) => {
 
 // Wide enough for every control (🔀 ⏮ ⏯ ⏭, the volume slider) beside the title.
 const MINI_DEFAULT_SIZE = { width: 480, height: 96 };
-const MINI_MIN_SIZE = { width: 240, height: 72 };
+// 52 px tall: as slim as Spotify's bar, the cover and ⏯ still 36 px.
+const MINI_MIN_SIZE = { width: 240, height: 52 };
 const MINI_MARGIN = 24;
 // The highest level Windows offers: the plain always-on-top one loses its
 // place to the taskbar and to other always-on-top windows.
@@ -572,7 +573,7 @@ function fromMini(event) {
 /** The commands the mini may send, rebuilt so nothing else rides along. */
 function readMiniCommand(value) {
   if (typeof value !== "object" || value === null) return null;
-  if (["toggle", "next", "previous", "toggleMute", "toggleShuffle"].includes(value.type)) return { type: value.type };
+  if (["toggle", "next", "previous", "toggleMute", "toggleShuffle", "cycleRepeat"].includes(value.type)) return { type: value.type };
   if (value.type === "seek" && Number.isFinite(value.seconds) && value.seconds >= 0) return { type: "seek", seconds: value.seconds };
   if (value.type === "volume" && Number.isFinite(value.volume)) return { type: "volume", volume: Math.min(1, Math.max(0, value.volume)) };
   return null;

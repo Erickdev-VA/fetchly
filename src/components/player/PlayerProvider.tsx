@@ -513,6 +513,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       else if (command.type === "seek") a.seek(command.seconds);
       else if (command.type === "volume") a.setVolume(command.volume);
       else if (command.type === "toggleShuffle") a.toggleShuffle();
+      else if (command.type === "cycleRepeat") a.cycleRepeat();
       else a.toggleMute();
     });
   }, []);

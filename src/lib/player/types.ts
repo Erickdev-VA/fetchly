@@ -50,7 +50,8 @@ export type PlayerCommand =
   | { type: "seek"; seconds: number }
   | { type: "volume"; volume: number }
   | { type: "toggleMute" }
-  | { type: "toggleShuffle" };
+  | { type: "toggleShuffle" }
+  | { type: "cycleRepeat" };
 
 /**
  * What the page tells Electron after every change, so the taskbar, tray
@@ -77,5 +78,5 @@ export function isPlayerCommand(value: unknown): value is PlayerCommand {
   const { type, seconds, volume } = value as { type?: unknown; seconds?: unknown; volume?: unknown };
   if (type === "seek") return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0;
   if (type === "volume") return typeof volume === "number" && volume >= 0 && volume <= 1;
-  return type === "toggle" || type === "next" || type === "previous" || type === "toggleMute" || type === "toggleShuffle";
+  return type === "toggle" || type === "next" || type === "previous" || type === "toggleMute" || type === "toggleShuffle" || type === "cycleRepeat";
 }
