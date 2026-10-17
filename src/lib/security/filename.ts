@@ -1,4 +1,4 @@
-const RESERVED_CHARS = /[\/:*?"<>|\x00-\x1f]/g;
+const RESERVED_CHARS = /[\\/:*?"<>|\x00-\x1f]/g;
 const WINDOWS_DEVICE_NAMES = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
 const MAX_LENGTH = 120;
 
@@ -14,7 +14,7 @@ export function safeFileStem(name: string, fallback = "Sin título"): string {
     .replace(RESERVED_CHARS, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/^\.+/, "");
+    .replace(/^[.\s]+/, "");
   // Cut by code points so an emoji isn't split in half; Windows also
   // rejects names ending in a dot or a space.
   const stem = Array.from(cleaned).slice(0, MAX_LENGTH).join("").replace(/[. ]+$/, "");
