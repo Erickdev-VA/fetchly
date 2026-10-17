@@ -24,9 +24,13 @@ const ERROR_VISIBLE_MS = 5000;
 export interface PlayerActions {
   /** Replaces the queue with `tracks` and plays from `startIndex`. */
   playTracks(tracks: Track[], startIndex: number): void;
+  /** Turns shuffle on and plays `tracks` from a random one. */
+  shuffleTracks(tracks: Track[]): void;
   playNext(tracks: Track[]): void;
   addToQueue(tracks: Track[]): void;
   toggle(): void;
+  /** Pauses the music if it is playing (a video is about to start). */
+  pause(): void;
   next(): void;
   /** The <audio> element finished a song: like next(), except "repeat one" replays it. */
   ended(): void;
@@ -152,6 +156,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         commit(next);
         load(currentEntry(next), true);
       },
+      shuffleTracks(tracks) {
+        if (tracks.length === 0) return;
+        prefsStore.update({ shuffle: true });
+        const next = newQueue(makeEntries(tracks), Math.floor(Math.random() * tracks.length), true);
+        commit(next);
+        load(currentEntry(next), true);
+      },
       playNext(tracks) {
         const hadSong = currentEntry(queueRef.current) !== null;
         const next = insertNext(queueRef.current, makeEntries(tracks));
@@ -175,6 +186,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         if (el.paused) el.play().catch(() => {});
         else el.pause();
+      },
+      pause() {
+        audio()?.pause();
       },
       next: () => advance(false),
       ended: () => advance(true),

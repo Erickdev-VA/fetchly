@@ -8,6 +8,7 @@ import { removeFromLibrary } from "@/lib/library/actions";
 import type { LibraryEntry } from "@/lib/library/types";
 import { toTrack } from "@/lib/player/types";
 import { usePlayer } from "../player/PlayerProvider";
+import { usePlaylistPicker } from "../playlists/PlaylistPicker";
 import { PlayerIcon } from "../player/PlayerIcon";
 import { PlatformBadge } from "../PlatformBadge";
 import { ErrorBanner } from "../ErrorBanner";
@@ -65,6 +66,7 @@ export function MusicLibrary() {
   const [actionError, setActionError] = useState<string | null>(null);
   const bridge = desktop();
   const player = usePlayer();
+  const picker = usePlaylistPicker();
   const currentId = player.current?.track.id ?? null;
 
   const visible = useMemo(() => {
@@ -89,6 +91,7 @@ export function MusicLibrary() {
     { label: "Reproducir", disabled: entry.missing, onSelect: () => playFromList(entry) },
     { label: "Reproducir a continuación", disabled: entry.missing, onSelect: () => player.actions.playNext([toTrack(entry)]) },
     { label: "Añadir a la cola", disabled: entry.missing, onSelect: () => player.actions.addToQueue([toTrack(entry)]) },
+    { label: "Añadir a playlist…", onSelect: () => picker.addToPlaylist([entry]) },
     ...(bridge
       ? [
           {

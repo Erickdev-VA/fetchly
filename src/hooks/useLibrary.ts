@@ -1,35 +1,36 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchLibrary, fetchLibraryRevision } from "@/lib/api";
-import type { Category, LibraryEntry } from "@/lib/library/types";
+import { fetchLibrary, fetchLibraryRevision, fetchPlaylist, fetchPlaylists } from "@/lib/api";
+import type { Category, LibraryEntry, PlaylistDetail, PlaylistSummary } from "@/lib/library/types";
 
 const REVISION_POLL_MS = 3000;
 
 /**
- * One category of the library, kept current: downloads that finish while
- * the page is open show up within a few seconds, and coming back to the
- * window re-checks which files were moved or deleted outside the app.
+ * Something read from the library, kept current: changes made while the
+ * page is open (a download finishing, a song added to a playlist) show up
+ * within a few seconds, and coming back to the window re-checks which files
+ * were moved or deleted outside the app. `load` must be stable (useCallback).
  */
-export function useLibrary(category: Category) {
-  const [items, setItems] = useState<LibraryEntry[] | null>(null);
+function useLiveResource<T>(load: () => Promise<{ revision: string; value: T }>, failMessage: string) {
+  const [value, setValue] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const revisionRef = useRef<string | null>(null);
-  // Only the newest request may update the list.
+  // Only the newest request may update the value.
   const requestRef = useRef(0);
 
   const reload = useCallback(async () => {
     const request = ++requestRef.current;
     try {
-      const result = await fetchLibrary(category);
+      const result = await load();
       if (request !== requestRef.current) return;
       revisionRef.current = result.revision;
-      setItems(result.items);
+      setValue(result.value);
       setError(null);
-    } catch {
-      if (request === requestRef.current) setError("No se pudo cargar la biblioteca.");
+    } catch (err) {
+      if (request === requestRef.current) setError(err instanceof Error && err.message ? err.message : failMessage);
     }
-  }, [category]);
+  }, [load, failMessage]);
 
   useEffect(() => {
     // From a callback rather than the effect body, as react-hooks/set-state-in-effect asks.
@@ -54,5 +55,30 @@ export function useLibrary(category: Category) {
     };
   }, [reload]);
 
-  return { items, error, reload };
+  return { value, error, reload };
+}
+
+/** One category of the library, newest first. */
+export function useLibrary(category: Category) {
+  const load = useCallback(
+    () => fetchLibrary(category).then(({ revision, items }) => ({ revision, value: items })),
+    [category],
+  );
+  const { value, error, reload } = useLiveResource<LibraryEntry[]>(load, "No se pudo cargar la biblioteca.");
+  return { items: value, error, reload };
+}
+
+export function usePlaylists() {
+  const load = useCallback(() => fetchPlaylists().then(({ revision, playlists }) => ({ revision, value: playlists })), []);
+  const { value, error, reload } = useLiveResource<PlaylistSummary[]>(load, "No se pudieron cargar las playlists.");
+  return { playlists: value, error, reload };
+}
+
+export function usePlaylist(id: string) {
+  const load = useCallback(
+    () => fetchPlaylist(id).then(({ revision, playlist }) => ({ revision, value: playlist })),
+    [id],
+  );
+  const { value, error, reload } = useLiveResource<PlaylistDetail>(load, "No se pudo cargar la playlist.");
+  return { playlist: value, error, reload };
 }

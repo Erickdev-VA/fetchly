@@ -21,6 +21,7 @@ export async function GET(_request: Request, context: { params: Promise<{ batchI
         percent: Math.round(item.percent),
         errorMessage: item.errorMessage ?? null,
         filePath: item.libraryItem?.filePath ?? null,
+        libraryItemId: item.libraryItem?.id ?? null,
       })),
     });
   } catch (err) {

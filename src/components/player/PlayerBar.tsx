@@ -6,6 +6,7 @@ import { LibraryThumb } from "../library/LibraryThumb";
 import { PlayerIcon, type PlayerIconName } from "./PlayerIcon";
 import { Slider } from "./Slider";
 import { usePlayer, usePlayerPosition } from "./PlayerProvider";
+import { usePlaylistPicker } from "../playlists/PlaylistPicker";
 
 function IconButton({
   icon,
@@ -65,6 +66,7 @@ function Progress() {
 export function PlayerBar() {
   const { current, playing, shuffle, repeat, volume, muted, hasPrevious, hasNext, error, queueOpen, setQueueOpen, actions } =
     usePlayer();
+  const picker = usePlaylistPicker();
   const track = current?.track ?? null;
   const volumeIcon: PlayerIconName = muted || volume === 0 ? "volume-off" : volume < 0.5 ? "volume-low" : "volume";
 
@@ -94,6 +96,7 @@ export function PlayerBar() {
             <p className="truncate text-sm text-white/35">Nada en reproducción</p>
           )}
         </div>
+        {track && <IconButton icon="plus" label="Añadir a playlist" onClick={() => picker.addToPlaylist([track])} size={16} />}
       </div>
 
       <div className="mx-auto flex w-full max-w-[520px] flex-col items-center gap-0.5">

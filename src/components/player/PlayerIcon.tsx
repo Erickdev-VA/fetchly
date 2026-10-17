@@ -13,7 +13,8 @@ export type PlayerIconName =
   | "close"
   | "mini"
   | "pin"
-  | "expand";
+  | "expand"
+  | "plus";
 
 const FILLED = new Set<PlayerIconName>(["play", "pause", "previous", "next"]);
 
@@ -90,6 +91,7 @@ const PATHS: Record<PlayerIconName, React.ReactNode> = {
   ),
   pin: <path d="M9 4h6M10 4v5.5L7 13h10l-3-3.5V4M12 13v7" />,
   expand: <path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7" />,
+  plus: <path d="M12 5v14M5 12h14" />,
 };
 
 export function PlayerIcon({ name, size = 18, className }: { name: PlayerIconName; size?: number; className?: string }) {

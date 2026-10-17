@@ -3,7 +3,7 @@ import { getDb } from "./db";
 import type { Category, LibraryItem } from "./types";
 import type { Platform } from "../platform/types";
 
-interface ItemRow {
+export interface ItemRow {
   id: string;
   category: Category;
   title: string;
@@ -17,7 +17,7 @@ interface ItemRow {
   created_at: number;
 }
 
-function fromRow(row: ItemRow): LibraryItem {
+export function fromRow(row: ItemRow): LibraryItem {
   return {
     id: row.id,
     category: row.category,
@@ -38,12 +38,17 @@ const globalStore = globalThis as unknown as { __fetchlyLibraryRevision?: { boot
 const revisionState = (globalStore.__fetchlyLibraryRevision ??= { boot: randomUUID().slice(0, 8), count: 0 });
 
 /**
- * Changes whenever an item is added or removed, so open pages can tell
+ * Changes whenever an item or a playlist is added, changed or removed, so open pages can tell
  * cheaply that their list is stale. The boot id keeps a restarted server
  * from repeating a value a page already saw.
  */
 export function libraryRevision(): string {
   return `${revisionState.boot}-${revisionState.count}`;
+}
+
+/** Marks the library (items or playlists) as changed for open pages. */
+export function bumpLibraryRevision(): void {
+  revisionState.count++;
 }
 
 export function insertItem(item: LibraryItem): void {

@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PLAYLIST_HEIGHTS, type DownloadMode, type PlaylistInfo } from "@/lib/platform/types";
 import { formatDuration } from "@/lib/format";
-import type { BatchItemStatus } from "@/lib/api";
+import { createPlaylist, type BatchItemStatus } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
-import { CATEGORY_LABEL, categoryForMode } from "@/lib/library/types";
+import { CATEGORY_LABEL, PLAYLIST_NAME_MAX, categoryForMode } from "@/lib/library/types";
 import { useBatchJob } from "@/hooks/useBatchJob";
 import { PlatformBadge } from "./PlatformBadge";
 import { SavedNotice } from "./SavedNotice";
@@ -326,6 +327,69 @@ export function PlaylistCard({
         )}
         {state.phase === "error" && <p className="w-full text-xs text-red-300">{state.message}</p>}
       </div>
+
+      {state.phase === "done" && category === "music" && completed > 0 && (
+        <PlaylistOffer
+          key={state.batchId}
+          name={playlist.title}
+          // Batch items keep the playlist order.
+          itemIds={items.flatMap((i) => (i.status === "completed" && i.libraryItemId ? [i.libraryItemId] : []))}
+        />
+      )}
+    </div>
+  );
+}
+
+/** After a playlist downloads as audio: "¿Crear la playlist «X» con N canciones?" */
+function PlaylistOffer({ name, itemIds }: { name: string; itemIds: string[] }) {
+  const [state, setState] = useState<
+    { step: "asking" } | { step: "creating" } | { step: "created"; id: string } | { step: "dismissed" } | { step: "error"; message: string }
+  >({ step: "asking" });
+
+  if (state.step === "dismissed" || itemIds.length === 0) return null;
+
+  const create = async () => {
+    setState({ step: "creating" });
+    try {
+      // Long titles are cut to the longest name a playlist can have.
+      setState({ step: "created", id: await createPlaylist(name.slice(0, PLAYLIST_NAME_MAX), itemIds) });
+    } catch (err) {
+      setState({ step: "error", message: err instanceof Error ? err.message : "No se pudo crear la playlist." });
+    }
+  };
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-[var(--accent)]/25 bg-[var(--accent)]/[0.07] px-4 py-3 text-sm">
+      {state.step === "created" ? (
+        <>
+          <span className="text-emerald-300/90">✓ Playlist «{name}» creada</span>
+          <Link href={`/playlists/${state.id}`} className="font-medium text-white/75 underline-offset-2 hover:text-white hover:underline">
+            Ver playlist
+          </Link>
+        </>
+      ) : (
+        <>
+          <span className="min-w-0 flex-1 text-white/80">
+            ¿Crear la playlist «{name}» con {itemIds.length} canci{itemIds.length === 1 ? "ón" : "ones"}?
+          </span>
+          <button
+            type="button"
+            disabled={state.step === "creating"}
+            onClick={() => void create()}
+            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition enabled:hover:brightness-110 disabled:opacity-50"
+          >
+            {state.step === "creating" ? "Creando…" : "Crear playlist"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setState({ step: "dismissed" })}
+            className="rounded-lg px-2 py-1.5 text-xs font-medium text-white/55 transition hover:text-white"
+          >
+            No, gracias
+          </button>
+          {state.step === "error" && <p className="w-full text-xs text-red-300">{state.message}</p>}
+        </>
+      )}
     </div>
   );
 }

@@ -23,6 +23,21 @@ const MIGRATIONS: string[] = [
      created_at       INTEGER NOT NULL
    );
    CREATE INDEX items_category_created ON items (category, created_at DESC);`,
+  // Playlists hold songs by reference: deleting a playlist keeps the songs,
+  // deleting a song drops it from every playlist.
+  `CREATE TABLE playlists (
+     id         TEXT PRIMARY KEY,
+     name       TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE TABLE playlist_items (
+     playlist_id TEXT NOT NULL REFERENCES playlists (id) ON DELETE CASCADE,
+     item_id     TEXT NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+     position    INTEGER NOT NULL,
+     PRIMARY KEY (playlist_id, item_id)
+   );
+   CREATE INDEX playlist_items_item ON playlist_items (item_id);`,
 ];
 
 // See the comment in lib/jobs/downloadJobs.ts about pinning state to globalThis.

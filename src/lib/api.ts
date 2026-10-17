@@ -1,5 +1,5 @@
 import type { AnalyzeResult, DownloadMode } from "./platform/types";
-import type { Category, LibraryEntry } from "./library/types";
+import type { Category, LibraryEntry, PlaylistDetail, PlaylistSummary } from "./library/types";
 
 export class ApiError extends Error {
   code: string;
@@ -75,6 +75,8 @@ export interface BatchProgress {
     percent: number;
     errorMessage: string | null;
     filePath: string | null;
+    /** The library entry it became, once completed. */
+    libraryItemId: string | null;
   }[];
 }
 
@@ -114,6 +116,12 @@ export function fetchLibraryRevision(): Promise<{ revision: string }> {
   return fetch("/api/library/revision", { cache: "no-store" }).then((res) => parseJsonOrThrow<{ revision: string }>(res));
 }
 
+export function fetchLibraryItem(id: string): Promise<{ category: Category; entry: LibraryEntry }> {
+  return fetch(`/api/library/${encodeURIComponent(id)}`, { cache: "no-store" }).then((res) =>
+    parseJsonOrThrow<{ category: Category; entry: LibraryEntry }>(res),
+  );
+}
+
 /** Forgets an item; its file must already be in the Recycle Bin (or gone). */
 export async function deleteLibraryItem(id: string): Promise<void> {
   const res = await fetch(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -126,4 +134,49 @@ export function libraryMediaUrl(id: string): string {
 
 export function libraryThumbnailUrl(id: string): string {
   return `/api/library/thumbnail/${encodeURIComponent(id)}`;
+}
+
+export function fetchPlaylists(): Promise<{ revision: string; playlists: PlaylistSummary[] }> {
+  return fetch("/api/playlists", { cache: "no-store" }).then((res) =>
+    parseJsonOrThrow<{ revision: string; playlists: PlaylistSummary[] }>(res),
+  );
+}
+
+export function fetchPlaylist(id: string): Promise<{ revision: string; playlist: PlaylistDetail }> {
+  return fetch(`/api/playlists/${encodeURIComponent(id)}`, { cache: "no-store" }).then((res) =>
+    parseJsonOrThrow<{ revision: string; playlist: PlaylistDetail }>(res),
+  );
+}
+
+const jsonInit = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+/** Creates a playlist, optionally with songs; resolves to its id. */
+export async function createPlaylist(name: string, itemIds: string[] = []): Promise<string> {
+  const { id } = await fetch("/api/playlists", jsonInit("POST", { name, itemIds })).then((res) =>
+    parseJsonOrThrow<{ id: string }>(res),
+  );
+  return id;
+}
+
+/** Renames it, or sets which songs it has and their order. */
+export async function updatePlaylist(id: string, change: { name: string } | { itemIds: string[] }): Promise<void> {
+  const res = await fetch(`/api/playlists/${encodeURIComponent(id)}`, jsonInit("PATCH", change));
+  if (!res.ok) await parseJsonOrThrow(res);
+}
+
+export async function deletePlaylist(id: string): Promise<void> {
+  const res = await fetch(`/api/playlists/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) await parseJsonOrThrow(res);
+}
+
+/** Adds songs at the end; resolves to how many were new to it. */
+export async function addToPlaylist(id: string, itemIds: string[]): Promise<number> {
+  const { added } = await fetch(`/api/playlists/${encodeURIComponent(id)}/items`, jsonInit("POST", { itemIds })).then(
+    (res) => parseJsonOrThrow<{ added: number }>(res),
+  );
+  return added;
 }
