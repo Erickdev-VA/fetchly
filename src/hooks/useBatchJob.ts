@@ -1,16 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  startBatch,
-  getBatchProgress,
-  cancelBatch,
-  discardBatch,
-  getBatchZipUrl,
-  getBatchItemUrl,
-  ApiError,
-  type BatchProgress,
-} from "@/lib/api";
+import { startBatch, getBatchProgress, cancelBatch, discardBatch, ApiError, type BatchProgress } from "@/lib/api";
 import type { DownloadMode } from "@/lib/platform/types";
 
 export type BatchState =
@@ -41,8 +32,9 @@ export function useBatchJob() {
     setState({ phase: "idle" });
   }, [stopPolling]);
 
-  // Free the server's temp files if the user navigates to another link.
-  useEffect(() => () => reset(), [reset]);
+  // Opening another link doesn't cancel a playlist that's downloading: it
+  // keeps going on the server and each video still lands in the library.
+  useEffect(() => stopPolling, [stopPolling]);
 
   const start = useCallback(
     async (params: {
@@ -68,17 +60,13 @@ export function useBatchJob() {
             }
             stopPolling();
             setState({ phase: "done", batchId, progress });
-            const done = progress.items.filter((i) => i.status === "completed");
-            // One file doesn't need a ZIP around it.
-            if (done.length === 1) window.location.assign(getBatchItemUrl(batchId, done[0].entryId));
-            else if (done.length > 1) window.location.assign(getBatchZipUrl(batchId));
           } catch {
             stopPolling();
-            setState({ phase: "error", message: "Lost connection while downloading." });
+            setState({ phase: "error", message: "Se perdió la conexión durante la descarga." });
           }
         }, POLL_INTERVAL_MS);
       } catch (err) {
-        const message = err instanceof ApiError ? err.message : "Couldn't start the download.";
+        const message = err instanceof ApiError ? err.message : "No se pudo iniciar la descarga.";
         setState({ phase: "error", message });
       }
     },

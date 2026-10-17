@@ -3,19 +3,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PLAYLIST_HEIGHTS, type DownloadMode, type PlaylistInfo } from "@/lib/platform/types";
 import { formatDuration } from "@/lib/format";
-import { getBatchItemUrl, getBatchZipUrl, type BatchItemStatus } from "@/lib/api";
+import type { BatchItemStatus } from "@/lib/api";
+import { desktop } from "@/lib/desktop";
+import { CATEGORY_LABEL, categoryForMode } from "@/lib/library/types";
 import { useBatchJob } from "@/hooks/useBatchJob";
 import { PlatformBadge } from "./PlatformBadge";
+import { SavedNotice } from "./SavedNotice";
 
 const QUALITY_OPTIONS: (number | "best")[] = ["best", ...PLAYLIST_HEIGHTS];
 
 const STATUS_LABEL: Record<BatchItemStatus, string> = {
-  queued: "Waiting",
-  downloading: "Downloading",
-  converting: "Converting",
-  completed: "Done",
-  error: "Failed",
-  cancelled: "Cancelled",
+  queued: "En espera",
+  downloading: "Descargando",
+  converting: "Convirtiendo",
+  completed: "Guardado",
+  error: "Falló",
+  cancelled: "Cancelado",
 };
 
 function Checkbox({ checked, indeterminate }: { checked: boolean; indeterminate?: boolean }) {
@@ -64,7 +67,8 @@ export function PlaylistCard({
 
   const progress = state.phase === "running" || state.phase === "done" ? state.progress : null;
   const progressById = useMemo(() => new Map(progress?.items.map((i) => [i.entryId, i]) ?? []), [progress]);
-  const batchId = state.phase === "running" || state.phase === "done" ? state.batchId : null;
+  const bridge = desktop();
+  const category = categoryForMode(mode);
 
   const locked = state.phase === "starting" || state.phase === "running" || state.phase === "done";
   const allSelected = selected.size === playlist.entries.length;
@@ -104,7 +108,7 @@ export function PlaylistCard({
           {playlist.author && <span>· {playlist.author}</span>}
           <span>
             · {playlist.entries.length} video{playlist.entries.length === 1 ? "" : "s"}
-            {playlist.truncated && " (first ones only)"}
+            {playlist.truncated && " (solo los primeros)"}
           </span>
         </div>
       </div>
@@ -117,14 +121,16 @@ export function PlaylistCard({
             className="inline-flex items-center gap-2 text-xs font-medium text-white/70 transition hover:text-white"
           >
             <Checkbox checked={allSelected} indeterminate={!allSelected && selected.size > 0} />
-            {allSelected ? "Deselect all" : "Select all"}
-            <span className="text-white/35">· {selected.size} selected</span>
+            {allSelected ? "Quitar todos" : "Seleccionar todos"}
+            <span className="text-white/35">
+              · {selected.size} seleccionado{selected.size === 1 ? "" : "s"}
+            </span>
           </button>
         ) : (
           <span className="text-xs text-white/50">
             {state.phase === "done"
-              ? `${completed} of ${items.length} downloaded${failed ? ` · ${failed} failed` : ""}`
-              : `Downloading ${Math.min(finished + 1, selected.size)} of ${selected.size}…`}
+              ? `${completed} de ${items.length} descargado${items.length === 1 ? "" : "s"}${failed ? ` · ${failed} con error` : ""}`
+              : `Descargando ${Math.min(finished + 1, selected.size)} de ${selected.size}…`}
           </span>
         )}
 
@@ -144,7 +150,7 @@ export function PlaylistCard({
                       : "border-white/10 bg-white/[0.03] text-white/60 hover:border-white/20 hover:text-white/85"
                   } disabled:cursor-default disabled:opacity-40`}
                 >
-                  {q === "best" ? "Best" : `${q}p`}
+                  {q === "best" ? "Máxima" : `${q}p`}
                 </button>
               );
             })}
@@ -216,7 +222,7 @@ export function PlaylistCard({
                   <p className="line-clamp-2 text-[13px] leading-snug text-white/90">
                     {entry.id === playlist.focusEntryId && (
                       <span className="mr-1.5 rounded bg-[var(--accent)]/25 px-1 py-px text-[10px] font-semibold text-white/90">
-                        Your link
+                        Tu enlace
                       </span>
                     )}
                     {entry.title}
@@ -240,15 +246,18 @@ export function PlaylistCard({
                     entry.author && <p className="mt-0.5 truncate text-[11px] text-white/35">{entry.author}</p>
                   )}
                 </div>
-                {item?.status === "completed" && batchId && (
-                  <a
-                    href={getBatchItemUrl(batchId, entry.id)}
-                    onClick={(e) => e.stopPropagation()}
+                {item?.status === "completed" && item.filePath && bridge && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void bridge.showItemInFolder(item.filePath!);
+                    }}
                     className="relative shrink-0 rounded-lg bg-white/10 px-2.5 py-1 text-[11px] font-medium text-white/85 transition hover:bg-white/[0.16]"
-                    title="Download just this video"
+                    title="Mostrar en carpeta"
                   >
-                    Save
-                  </a>
+                    Mostrar
+                  </button>
                 )}
               </div>
             </li>
@@ -274,8 +283,8 @@ export function PlaylistCard({
             className="w-full rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:cursor-default disabled:opacity-40 sm:w-auto sm:px-7"
           >
             {selected.size === 0
-              ? "Select videos to download"
-              : `Download ${selected.size} video${selected.size === 1 ? "" : "s"}`}
+              ? "Selecciona videos para descargar"
+              : `Descargar ${selected.size} video${selected.size === 1 ? "" : "s"}`}
           </button>
         ) : state.phase === "starting" || state.phase === "running" ? (
           <>
@@ -285,7 +294,7 @@ export function PlaylistCard({
                 style={{ width: `${overall}%` }}
               />
               <span className="relative">
-                {state.phase === "starting" ? "Preparing…" : `Downloading ${Math.round(overall)}%`}
+                {state.phase === "starting" ? "Preparando…" : `Descargando ${Math.round(overall)}%`}
               </span>
             </div>
             {state.phase === "running" && !progress?.cancelled && (
@@ -294,26 +303,24 @@ export function PlaylistCard({
                 onClick={cancel}
                 className="rounded-xl px-3 py-2 text-xs font-medium text-white/55 transition hover:text-white"
               >
-                Cancel
+                Cancelar
               </button>
             )}
           </>
         ) : (
           <>
-            {completed > 1 && batchId && (
-              <a
-                href={getBatchZipUrl(batchId)}
-                className="w-full rounded-xl bg-[var(--accent)] py-2.5 text-center text-sm font-semibold text-white transition active:scale-[0.98] sm:w-auto sm:px-7"
-              >
-                Download ZIP again
-              </a>
+            {completed > 0 && (
+              <SavedNotice
+                category={category}
+                text={`${completed} guardado${completed === 1 ? "" : "s"} en ${CATEGORY_LABEL[category]}`}
+              />
             )}
             <button
               type="button"
               onClick={reset}
               className="rounded-xl px-3 py-2 text-xs font-medium text-white/55 transition hover:text-white"
             >
-              Choose other videos
+              Elegir otros videos
             </button>
           </>
         )}

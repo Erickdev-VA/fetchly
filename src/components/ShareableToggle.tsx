@@ -19,7 +19,7 @@ export function ShareableToggle({
       className={`inline-flex cursor-pointer select-none items-center gap-2 text-xs text-white/55 ${
         disabled ? "pointer-events-none opacity-50" : ""
       }`}
-      title="Converts to H.264/AAC when needed so the file can be shared on WhatsApp and posted to Status."
+      title="Convierte a H.264/AAC cuando hace falta, para poder enviar el archivo por WhatsApp y publicarlo en Estados."
     >
       <button
         type="button"
@@ -33,7 +33,7 @@ export function ShareableToggle({
         />
       </button>
       {/* Clicking the label text activates the switch (buttons are labelable). */}
-      <span>WhatsApp-compatible</span>
+      <span>Compatible con WhatsApp</span>
     </label>
   );
 }

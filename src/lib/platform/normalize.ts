@@ -48,7 +48,7 @@ export function normalizeMediaInfo(raw: RawYtDlpInfo): NormalizedMedia {
     : null;
 
   return {
-    title: raw.title?.trim() || "Untitled",
+    title: raw.title?.trim() || "Sin título",
     thumbnailUrl: raw.thumbnail ?? null,
     durationSeconds: raw.duration ?? null,
     author: raw.uploader ?? raw.channel ?? null,

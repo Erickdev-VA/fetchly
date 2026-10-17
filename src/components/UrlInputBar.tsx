@@ -17,7 +17,7 @@ export function UrlInputBar({ value, onChange, onSubmit, onPasteClick, disabled 
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
-        placeholder="Paste the link here"
+        placeholder="Pega aquí el enlace"
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
@@ -32,7 +32,7 @@ export function UrlInputBar({ value, onChange, onSubmit, onPasteClick, disabled 
         disabled={disabled}
         className="shrink-0 rounded-xl bg-white/10 px-3.5 py-2 text-sm font-medium text-white/90 transition hover:bg-white/[0.16] active:scale-[0.97] disabled:opacity-50"
       >
-        Paste
+        Pegar
       </button>
     </div>
   );

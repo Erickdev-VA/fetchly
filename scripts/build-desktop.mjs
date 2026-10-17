@@ -8,7 +8,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const standaloneDir = path.join(root, ".next", "standalone");
+const buildDir = path.join(root, ".next-build"); // distDir in next.config.mjs
+const standaloneDir = path.join(buildDir, "standalone");
 const outDir = path.join(root, "dist-desktop", "server");
 
 const ytdlpName = process.platform === "win32" ? "yt-dlp.exe" : process.platform === "darwin" ? "yt-dlp_macos" : "yt-dlp";
@@ -23,6 +24,9 @@ for (const file of [ytdlpSrc, ffmpegSrc]) {
   }
 }
 
+// Remove the previous output first, or the build would trace (and copy) it.
+rmSync(path.dirname(outDir), { recursive: true, force: true });
+
 const build = spawnSync(process.execPath, [path.join(root, "node_modules", "next", "dist", "bin", "next"), "build"], {
   cwd: root,
   stdio: "inherit",
@@ -31,11 +35,10 @@ const build = spawnSync(process.execPath, [path.join(root, "node_modules", "next
 if (build.status !== 0) process.exit(build.status ?? 1);
 
 if (!existsSync(path.join(standaloneDir, "server.js"))) {
-  console.error("[build-desktop] next build did not produce .next/standalone/server.js");
+  console.error("[build-desktop] next build did not produce .next-build/standalone/server.js");
   process.exit(1);
 }
 
-rmSync(outDir, { recursive: true, force: true });
 mkdirSync(path.dirname(outDir), { recursive: true });
 renameSync(standaloneDir, outDir);
 
@@ -50,7 +53,8 @@ cpSync(ytdlpSrc, path.join(outDir, "bin", ytdlpName));
 mkdirSync(path.join(outDir, "node_modules", "ffmpeg-static"), { recursive: true });
 cpSync(ffmpegSrc, path.join(outDir, "node_modules", "ffmpeg-static", ffmpegName));
 
-cpSync(path.join(root, ".next", "static"), path.join(outDir, ".next", "static"), { recursive: true });
+// The standalone server reads its build from <server>/.next-build.
+cpSync(path.join(buildDir, "static"), path.join(outDir, ".next-build", "static"), { recursive: true });
 cpSync(path.join(root, "public"), path.join(outDir, "public"), { recursive: true });
 
 console.log(`[build-desktop] Server ready at ${path.relative(root, outDir)}`);

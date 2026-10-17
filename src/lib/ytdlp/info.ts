@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { AppError } from "../errors";
 import { logger } from "../logger";
 import { YTDLP_PATH, FFMPEG_PATH } from "./binary";
-import { getCookiesArgs } from "./cookies";
 import { getJsRuntimeArgs, getJsRuntimeEnv } from "./jsRuntime";
 import { getExtractorArgs } from "./extractors";
 import { killProcessTree } from "./process";
@@ -28,7 +27,6 @@ async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
         "--ffmpeg-location",
         FFMPEG_PATH,
         ...getJsRuntimeArgs(),
-        ...getCookiesArgs(),
         ...getExtractorArgs(),
         ...args,
       ],
@@ -40,7 +38,7 @@ async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
       (error, stdout, stderr) => {
         clearTimeout(timer);
         if (timedOut) {
-          reject(new AppError("METADATA_FAILED", "Fetching information took too long."));
+          reject(new AppError("METADATA_FAILED", "Obtener la información tardó demasiado."));
           return;
         }
         if (!error) {
@@ -57,7 +55,7 @@ async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
 
         if (/no video could be found|no suitable extractor|unsupported url/i.test(text)) {
           // e.g. a tweet that's only text/images, or one linking elsewhere.
-          reject(new AppError("CONTENT_UNAVAILABLE", "This post doesn't contain a video that can be downloaded."));
+          reject(new AppError("CONTENT_UNAVAILABLE", "Esta publicación no contiene un video que se pueda descargar."));
         } else if (/private|login required|rate-?limit/i.test(text)) {
           reject(new AppError("CONTENT_PRIVATE"));
         } else if (/unavailable|not available|removed|404|does not exist/i.test(text)) {

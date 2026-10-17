@@ -44,7 +44,7 @@ export function QualityChips({
 }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      <Chip active={selected === "best"} onClick={() => onSelect("best")} disabled={disabled} label="Best" />
+      <Chip active={selected === "best"} onClick={() => onSelect("best")} disabled={disabled} label="Máxima" />
       {qualities.map((q) => (
         <Chip
           key={q.height}

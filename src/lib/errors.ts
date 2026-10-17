@@ -9,26 +9,22 @@ export type ErrorCode =
   | "DOWNLOAD_FAILED"
   | "TOO_LONG"
   | "TOO_LARGE"
-  | "RATE_LIMITED"
-  | "SERVER_BUSY"
   | "NOT_FOUND"
   | "INTERNAL";
 
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {
-  INVALID_URL: "That link doesn't look valid. Double-check it and try again.",
-  UNSUPPORTED_PLATFORM: "This link isn't from a supported platform yet.",
-  CONTENT_UNAVAILABLE: "This content isn't available anymore.",
-  CONTENT_PRIVATE: "This content is private and can't be accessed.",
-  LIVE_UNSUPPORTED: "Live streams aren't supported.",
-  METADATA_FAILED: "Couldn't fetch information for this link.",
-  PROCESSING_FAILED: "Something went wrong while processing this content.",
-  DOWNLOAD_FAILED: "The download failed. Please try again.",
-  TOO_LONG: "This content is too long to process.",
-  TOO_LARGE: "This file is too large to download.",
-  RATE_LIMITED: "You're doing that a bit too much. Please wait a moment and try again.",
-  SERVER_BUSY: "The server is busy right now. Please try again shortly.",
-  NOT_FOUND: "We couldn't find that request. It may have expired — try again.",
-  INTERNAL: "Something went wrong on our end.",
+  INVALID_URL: "Ese enlace no parece válido. Revísalo e inténtalo de nuevo.",
+  UNSUPPORTED_PLATFORM: "Este enlace no es de una plataforma compatible.",
+  CONTENT_UNAVAILABLE: "Este contenido ya no está disponible.",
+  CONTENT_PRIVATE: "Este contenido es privado y no se puede acceder a él.",
+  LIVE_UNSUPPORTED: "Las transmisiones en vivo no son compatibles.",
+  METADATA_FAILED: "No se pudo obtener la información de este enlace.",
+  PROCESSING_FAILED: "Algo salió mal al procesar este contenido.",
+  DOWNLOAD_FAILED: "La descarga falló. Inténtalo de nuevo.",
+  TOO_LONG: "Este contenido es demasiado largo para procesarlo.",
+  TOO_LARGE: "Este archivo es demasiado grande para descargarlo.",
+  NOT_FOUND: "No se encontró esa solicitud. Puede que haya caducado; inténtalo de nuevo.",
+  INTERNAL: "Algo salió mal.",
 };
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
@@ -42,8 +38,6 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   DOWNLOAD_FAILED: 500,
   TOO_LONG: 422,
   TOO_LARGE: 422,
-  RATE_LIMITED: 429,
-  SERVER_BUSY: 503,
   NOT_FOUND: 404,
   INTERNAL: 500,
 };

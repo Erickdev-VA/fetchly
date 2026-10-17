@@ -7,6 +7,9 @@ export interface CachedMediaAnalysis {
   url: string;
   platform: Platform;
   title: string;
+  author: string | null;
+  thumbnailUrl: string | null;
+  durationSeconds: number | null;
   availableHeights: number[];
   hasAudioOnlyStream: boolean;
   hasVideoOnlyStream: boolean;
@@ -20,8 +23,17 @@ export interface CachedPlaylistAnalysis {
   platform: Platform;
   title: string;
   /** Allowlist of downloadable entries: batch requests may only reference these. */
-  entries: Map<string, { url: string; title: string; index: number }>;
+  entries: Map<string, PlaylistAnalysisEntry>;
   createdAt: number;
+}
+
+export interface PlaylistAnalysisEntry {
+  url: string;
+  title: string;
+  author: string | null;
+  thumbnailUrl: string | null;
+  durationSeconds: number | null;
+  index: number;
 }
 
 export type CachedAnalysis = CachedMediaAnalysis | CachedPlaylistAnalysis;

@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAnalysis } from "@/lib/jobs/analysisCache";
 import { startBatchJob } from "@/lib/jobs/batchJobs";
-import { isServerBusy } from "@/lib/jobs/capacity";
-import { checkRateLimit, getClientKey } from "@/lib/ratelimit";
 import { AppError } from "@/lib/errors";
 import { errorResponse } from "@/lib/http";
 import { PLAYLIST_HEIGHTS, type DownloadMode } from "@/lib/platform/types";
@@ -20,21 +18,13 @@ interface StartBody {
 
 export async function POST(request: Request) {
   try {
-    const clientKey = getClientKey(request.headers);
-    if (!checkRateLimit(`download:${clientKey}`, 10, 5 * 60 * 1000)) {
-      throw new AppError("RATE_LIMITED");
-    }
-    if (isServerBusy()) {
-      throw new AppError("SERVER_BUSY");
-    }
-
     const body = ((await request.json().catch(() => null)) ?? {}) as StartBody;
 
     if (typeof body.analysisId !== "string") {
-      throw new AppError("INVALID_URL", "Missing analysis reference.");
+      throw new AppError("INVALID_URL", "Falta la referencia del análisis.");
     }
     if (typeof body.mode !== "string" || !VALID_MODES.includes(body.mode as DownloadMode)) {
-      throw new AppError("INVALID_URL", "Invalid mode.");
+      throw new AppError("INVALID_URL", "Modo no válido.");
     }
     const mode = body.mode as DownloadMode;
 
@@ -42,15 +32,15 @@ export async function POST(request: Request) {
     if (!analysis || analysis.kind !== "playlist") throw new AppError("NOT_FOUND");
 
     if (!Array.isArray(body.entryIds) || body.entryIds.length === 0) {
-      throw new AppError("INVALID_URL", "Select at least one video.");
+      throw new AppError("INVALID_URL", "Selecciona al menos un video.");
     }
     const ids = [...new Set(body.entryIds)];
     if (ids.length > MAX_BATCH_ITEMS) {
-      throw new AppError("INVALID_URL", `You can download up to ${MAX_BATCH_ITEMS} videos at once.`);
+      throw new AppError("INVALID_URL", `Puedes descargar hasta ${MAX_BATCH_ITEMS} videos a la vez.`);
     }
     const entries = ids.map((id) => {
       const entry = typeof id === "string" ? analysis.entries.get(id) : undefined;
-      if (!entry) throw new AppError("INVALID_URL", "One of the selected videos isn't part of this playlist.");
+      if (!entry) throw new AppError("INVALID_URL", "Uno de los videos seleccionados no pertenece a esta playlist.");
       return { entryId: id as string, ...entry };
     });
 
@@ -58,13 +48,14 @@ export async function POST(request: Request) {
     if (body.height !== undefined && body.height !== null && body.height !== "best") {
       const n = Number(body.height);
       if (!(PLAYLIST_HEIGHTS as readonly number[]).includes(n)) {
-        throw new AppError("INVALID_URL", "Invalid quality.");
+        throw new AppError("INVALID_URL", "Calidad no válida.");
       }
       height = n;
     }
 
     const batchId = await startBatchJob({
       title: analysis.title,
+      platform: analysis.platform,
       mode,
       height,
       shareable: body.shareable !== false,

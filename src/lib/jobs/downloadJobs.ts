@@ -6,12 +6,18 @@ import type { ChildProcess } from "node:child_process";
 import { killProcessTree } from "../ytdlp/process";
 import { logger } from "../logger";
 import { runDownload, DownloadError } from "./runDownload";
-import type { DownloadMode } from "../platform/types";
+import { acquireDownloadSlot } from "./capacity";
+import { addDownloadToLibrary } from "../library/store";
+import { categoryForMode, type LibraryItem } from "../library/types";
+import type { DownloadMode, Platform } from "../platform/types";
 
 export const TMP_ROOT = path.join(os.tmpdir(), "media-downloader-jobs");
-const JOB_TTL_MS = 20 * 60 * 1000;
+/** How long a finished job's status stays readable by the page. */
+const FINISHED_JOB_TTL_MS = 20 * 60 * 1000;
 
-export type JobStatus = "preparing" | "processing" | "completed" | "error";
+export const SAVE_FAILED_MESSAGE = "No se pudo guardar el archivo en la biblioteca.";
+
+export type JobStatus = "queued" | "processing" | "completed" | "error";
 
 export interface DownloadJob {
   id: string;
@@ -19,13 +25,11 @@ export interface DownloadJob {
   percent: number;
   converting: boolean;
   errorMessage?: string;
-  /** Suggested download name, e.g. the video title (sanitized on use, not on disk). */
-  title: string;
-  fileName?: string;
-  filePath?: string;
+  /** The library entry the file became, once completed. */
+  item?: LibraryItem;
   tempDir: string;
   child?: ChildProcess;
-  createdAt: number;
+  finishedAt?: number;
 }
 
 // Next.js dev (Turbopack) can re-evaluate this module's top-level scope on
@@ -50,15 +54,13 @@ globalStore.__mediaDownloaderJobs = store;
 
 const jobs = store.jobs;
 
-export function activeDownloadCount(): number {
-  let n = 0;
-  for (const j of jobs.values()) if (j.status === "preparing" || j.status === "processing") n++;
-  return n;
-}
-
 export async function startDownloadJob(opts: {
   url: string;
   title: string;
+  author: string | null;
+  thumbnailUrl: string | null;
+  durationSeconds: number | null;
+  platform: Platform;
   mode: DownloadMode;
   height: number | "best";
   hasAudioOnlyStream: boolean;
@@ -71,39 +73,58 @@ export async function startDownloadJob(opts: {
   const tempDir = path.join(TMP_ROOT, id);
   await mkdir(tempDir, { recursive: true });
 
-  const job: DownloadJob = {
-    id,
-    status: "processing",
-    percent: 0,
-    converting: false,
-    title: opts.title,
-    tempDir,
-    createdAt: Date.now(),
-  };
+  const job: DownloadJob = { id, status: "queued", percent: 0, converting: false, tempDir };
   jobs.set(id, job);
 
-  runDownload({
-    ...opts,
-    tempDir,
-    onProgress: (percent, phase) => {
-      job.percent = percent;
-      job.converting = phase === "converting";
-    },
-    onChild: (child) => {
-      job.child = child;
-    },
-  })
-    .then((filePath) => {
-      job.filePath = filePath;
-      job.fileName = path.basename(filePath);
+  void (async () => {
+    const release = await acquireDownloadSlot();
+    job.status = "processing";
+    let filePath: string;
+    try {
+      filePath = await runDownload({
+        ...opts,
+        tempDir,
+        onProgress: (percent, phase) => {
+          job.percent = percent;
+          job.converting = phase === "converting";
+        },
+        onChild: (child) => {
+          job.child = child;
+        },
+      });
+    } catch (err) {
+      job.status = "error";
+      job.errorMessage = err instanceof DownloadError ? err.message : "La descarga falló. Inténtalo de nuevo.";
+      job.finishedAt = Date.now();
+      await cleanupJobFiles(job);
+      return;
+    } finally {
+      job.child = undefined;
+      release();
+    }
+
+    try {
+      job.item = await addDownloadToLibrary({
+        tempFilePath: filePath,
+        category: categoryForMode(opts.mode),
+        title: opts.title,
+        artist: opts.author,
+        durationSeconds: opts.durationSeconds,
+        platform: opts.platform,
+        sourceUrl: opts.url,
+        thumbnailUrl: opts.thumbnailUrl,
+      });
       job.percent = 100;
       job.status = "completed";
-    })
-    .catch(async (err) => {
+    } catch (err) {
+      logger.error("saving to the library failed", { id, err: String(err) });
       job.status = "error";
-      job.errorMessage = err instanceof DownloadError ? err.message : "The download failed. Please try again.";
+      job.errorMessage = SAVE_FAILED_MESSAGE;
+    } finally {
+      job.finishedAt = Date.now();
       await cleanupJobFiles(job);
-    });
+    }
+  })();
 
   return id;
 }
@@ -118,13 +139,6 @@ export async function cleanupJobFiles(job: { id: string; tempDir: string }): Pro
   } catch (err) {
     logger.warn("temp dir cleanup failed", { id: job.id, err: String(err) });
   }
-}
-
-export async function finalizeJob(id: string): Promise<void> {
-  const job = jobs.get(id);
-  if (!job) return;
-  await cleanupJobFiles(job);
-  jobs.delete(id);
 }
 
 /**
@@ -147,13 +161,15 @@ export async function initTempRoot(): Promise<void> {
 
   if (!store.sweepIntervalStarted) {
     store.sweepIntervalStarted = true;
+    // Running jobs are bounded by runDownload's own timeouts; only forget
+    // finished ones here. Their files already live in the library.
     setInterval(
       () => {
         const now = Date.now();
         for (const [id, job] of jobs) {
-          if (now - job.createdAt > JOB_TTL_MS) {
+          if (job.finishedAt && now - job.finishedAt > FINISHED_JOB_TTL_MS) {
             killProcessTree(job.child);
-            cleanupJobFiles(job).finally(() => jobs.delete(id));
+            jobs.delete(id);
           }
         }
       },

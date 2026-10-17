@@ -6,6 +6,7 @@ import { formatDuration, formatBytes } from "@/lib/format";
 import { PlatformBadge } from "./PlatformBadge";
 import { QualityChips } from "./QualityChips";
 import { DownloadButton } from "./DownloadButton";
+import { SavedNotice } from "./SavedNotice";
 import { useDownloadJob } from "@/hooks/useDownloadJob";
 
 export function MediaCard({
@@ -18,10 +19,10 @@ export function MediaCard({
   shareable: boolean;
 }) {
   const [quality, setQuality] = useState<number | "best">("best");
-  const { state, start, reset } = useDownloadJob();
+  const { state, saved, start, reset } = useDownloadJob();
 
   useEffect(() => {
-    reset();
+    reset(true);
   }, [media.analysisId, mode, reset]);
 
   useEffect(() => {
@@ -34,7 +35,7 @@ export function MediaCard({
   const showQuality = mode !== "audio" && media.qualities.length > 0;
   const isBusy =
     state.phase === "starting" ||
-    state.phase === "preparing" ||
+    state.phase === "queued" ||
     state.phase === "processing" ||
     state.phase === "converting";
   const duration = formatDuration(media.durationSeconds);
@@ -84,7 +85,7 @@ export function MediaCard({
           {showQuality ? (
             <QualityChips qualities={media.qualities} selected={quality} onSelect={setQuality} disabled={isBusy} />
           ) : mode === "audio" ? (
-            <span className="text-xs text-white/40">Best available audio quality</span>
+            <span className="text-xs text-white/40">Mejor calidad de audio disponible</span>
           ) : null}
 
           <div className="mt-1 flex flex-wrap items-center gap-3">
@@ -105,6 +106,7 @@ export function MediaCard({
           </div>
 
           {state.phase === "error" && <p className="text-xs text-red-300">{state.message}</p>}
+          {saved && state.phase !== "error" && <SavedNotice category={saved.category} filePath={saved.filePath} />}
         </div>
       </div>
     </div>

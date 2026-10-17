@@ -44,7 +44,7 @@ export function normalizePlaylist(raw: RawYtDlpPlaylist): NormalizedPlaylist {
 
   for (const e of raw.entries ?? []) {
     if (!e?.id || !VIDEO_ID_RE.test(e.id) || seen.has(e.id)) continue;
-    const title = e.title?.trim() || "Untitled";
+    const title = e.title?.trim() || "Sin título";
     if (UNAVAILABLE_TITLE_RE.test(title)) continue;
     if (e.live_status === "is_live" || e.live_status === "is_upcoming") continue;
     seen.add(e.id);

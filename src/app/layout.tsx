@@ -13,14 +13,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Fetchly — Paste a link, get your media",
-  description: "Paste a YouTube, TikTok, Instagram, or X (Twitter) link and download it in seconds.",
+  title: "Fetchly",
+  description: "Descarga música y videos de YouTube, TikTok, Instagram y X, y escúchalos en tu biblioteca.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
+      lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>

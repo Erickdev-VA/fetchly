@@ -3,13 +3,17 @@ import path from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import type { ChildProcess } from "node:child_process";
 import { killProcessTree } from "../ytdlp/process";
+import { logger } from "../logger";
 import { runDownload, DownloadError } from "./runDownload";
-import { TMP_ROOT, initTempRoot, cleanupJobFiles } from "./downloadJobs";
-import type { DownloadMode } from "../platform/types";
+import { acquireDownloadSlot } from "./capacity";
+import { TMP_ROOT, SAVE_FAILED_MESSAGE, initTempRoot, cleanupJobFiles } from "./downloadJobs";
+import { addDownloadToLibrary } from "../library/store";
+import { categoryForMode, type LibraryItem } from "../library/types";
+import type { DownloadMode, Platform } from "../platform/types";
 
-/** Videos downloaded in parallel within one batch. */
+/** Videos downloaded in parallel within one batch (on top of the app-wide limit). */
 const BATCH_CONCURRENCY = Number(process.env.BATCH_CONCURRENCY ?? 2);
-/** How long finished files stay available for download after the batch ends. */
+/** How long a finished batch's status stays readable by the page. */
 const FINISHED_TTL_MS = 60 * 60 * 1000;
 const ITEM_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 3000;
@@ -20,18 +24,23 @@ export interface BatchItem {
   entryId: string;
   url: string;
   title: string;
-  /** Position in the playlist, used to number files in the ZIP. */
+  author: string | null;
+  thumbnailUrl: string | null;
+  durationSeconds: number | null;
+  /** Position in the playlist. */
   index: number;
   status: BatchItemStatus;
   percent: number;
   errorMessage?: string;
-  filePath?: string;
+  /** The library entry the file became, once completed. */
+  libraryItem?: LibraryItem;
   child?: ChildProcess;
 }
 
 export interface BatchJob {
   id: string;
   title: string;
+  platform: Platform;
   mode: DownloadMode;
   height: number | "best";
   shareable: boolean;
@@ -77,12 +86,6 @@ export function isBatchRunning(batch: BatchJob): boolean {
   return batch.finishedAt === undefined;
 }
 
-export function activeBatchCount(): number {
-  let n = 0;
-  for (const b of batches.values()) if (isBatchRunning(b)) n++;
-  return n;
-}
-
 export function getBatch(id: string): BatchJob | null {
   return batches.get(id) ?? null;
 }
@@ -92,11 +95,19 @@ async function runItem(batch: BatchJob, item: BatchItem): Promise<void> {
   // Start from an empty dir so a retry never picks up a failed attempt's leftovers.
   await rm(itemDir, { recursive: true, force: true });
   await mkdir(itemDir, { recursive: true });
-  item.status = "downloading";
+  item.status = "queued";
   item.percent = 0;
   item.errorMessage = undefined;
+
+  const release = await acquireDownloadSlot();
+  let filePath: string;
   try {
-    item.filePath = await runDownload({
+    if (batch.cancelled) {
+      item.status = "cancelled";
+      return;
+    }
+    item.status = "downloading";
+    filePath = await runDownload({
       url: item.url,
       mode: batch.mode,
       height: batch.height,
@@ -115,17 +126,40 @@ async function runItem(batch: BatchJob, item: BatchItem): Promise<void> {
         if (batch.cancelled) killProcessTree(child);
       },
     });
-    item.percent = 100;
-    item.status = "completed";
   } catch (err) {
     if (batch.cancelled) {
       item.status = "cancelled";
     } else {
       item.status = "error";
-      item.errorMessage = err instanceof DownloadError ? err.message : "The download failed.";
+      item.errorMessage = err instanceof DownloadError ? err.message : "La descarga falló.";
     }
+    return;
   } finally {
     item.child = undefined;
+    release();
+  }
+
+  // Each video goes into the library as soon as it's ready, so whatever
+  // finished is kept even if the rest of the playlist is cancelled.
+  try {
+    item.libraryItem = await addDownloadToLibrary({
+      tempFilePath: filePath,
+      category: categoryForMode(batch.mode),
+      title: item.title,
+      artist: item.author,
+      durationSeconds: item.durationSeconds,
+      platform: batch.platform,
+      sourceUrl: item.url,
+      thumbnailUrl: item.thumbnailUrl,
+    });
+    item.percent = 100;
+    item.status = "completed";
+  } catch (err) {
+    logger.error("saving to the library failed", { batch: batch.id, entry: item.entryId, err: String(err) });
+    item.status = "error";
+    item.errorMessage = SAVE_FAILED_MESSAGE;
+  } finally {
+    await rm(itemDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -145,9 +179,9 @@ async function runBatch(batch: BatchJob): Promise<void> {
           break;
         }
         await runItem(batch, item);
-        if (item.status !== "error" || batch.cancelled) break;
+        if (item.status !== "error" || batch.cancelled || item.errorMessage === SAVE_FAILED_MESSAGE) break;
         if (attempt < ITEM_ATTEMPTS) {
-          item.status = "queued"; // don't flash "Failed" in the UI before the retry
+          item.status = "queued"; // don't flash "Falló" in the UI before the retry
           await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
         }
       }
@@ -155,14 +189,24 @@ async function runBatch(batch: BatchJob): Promise<void> {
   };
   await Promise.all(Array.from({ length: Math.max(1, BATCH_CONCURRENCY) }, worker));
   batch.finishedAt = Date.now();
+  await cleanupJobFiles(batch);
 }
 
 export async function startBatchJob(opts: {
   title: string;
+  platform: Platform;
   mode: DownloadMode;
   height: number | "best";
   shareable: boolean;
-  entries: { entryId: string; url: string; title: string; index: number }[];
+  entries: {
+    entryId: string;
+    url: string;
+    title: string;
+    author: string | null;
+    thumbnailUrl: string | null;
+    durationSeconds: number | null;
+    index: number;
+  }[];
 }): Promise<string> {
   await initTempRoot();
 
@@ -173,6 +217,7 @@ export async function startBatchJob(opts: {
   const batch: BatchJob = {
     id,
     title: opts.title,
+    platform: opts.platform,
     mode: opts.mode,
     height: opts.height,
     shareable: opts.shareable,
@@ -198,11 +243,10 @@ export function cancelBatch(id: string): void {
   }
 }
 
-/** Deletes a batch and its files right away (after its ZIP was delivered or on dismiss). */
+/** Forgets a finished batch. Its files are already in the library. */
 export async function discardBatch(id: string): Promise<void> {
   const batch = batches.get(id);
-  if (!batch) return;
-  cancelBatch(id);
+  if (!batch || isBatchRunning(batch)) return;
   batches.delete(id);
   await cleanupJobFiles(batch);
 }

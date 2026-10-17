@@ -11,7 +11,6 @@ import {
   youtubeVideoUrl,
 } from "@/lib/platform/playlist";
 import { saveAnalysis } from "@/lib/jobs/analysisCache";
-import { checkRateLimit, getClientKey } from "@/lib/ratelimit";
 import { AppError } from "@/lib/errors";
 import { errorResponse } from "@/lib/http";
 import { logger } from "@/lib/logger";
@@ -27,14 +26,24 @@ async function analyzePlaylist(url: URL, platform: Platform, listId: string): Pr
   // Mixes only resolve from a watch URL, and yt-dlp handles every form.
   const raw = await fetchPlaylistInfo(url.href, maxEntries);
   const playlist = normalizePlaylist(raw);
-  if (playlist.entries.length === 0) throw new AppError("CONTENT_UNAVAILABLE", "This playlist has no downloadable videos.");
+  if (playlist.entries.length === 0) throw new AppError("CONTENT_UNAVAILABLE", "Esta playlist no tiene videos que se puedan descargar.");
 
   const analysisId = saveAnalysis({
     kind: "playlist",
     platform,
     title: playlist.title,
     entries: new Map(
-      playlist.entries.map((e, index) => [e.id, { url: youtubeVideoUrl(e.id), title: e.title, index }]),
+      playlist.entries.map((e, index) => [
+        e.id,
+        {
+          url: youtubeVideoUrl(e.id),
+          title: e.title,
+          author: e.author,
+          thumbnailUrl: e.thumbnailUrl,
+          durationSeconds: e.durationSeconds,
+          index,
+        },
+      ]),
     ),
   });
 
@@ -68,6 +77,9 @@ async function analyzeMedia(url: URL, platform: Platform): Promise<MediaInfo> {
     url: url.href,
     platform,
     title: normalized.title,
+    author: normalized.author,
+    thumbnailUrl: normalized.thumbnailUrl,
+    durationSeconds: normalized.durationSeconds,
     availableHeights: normalized.qualities.map((q) => q.height),
     hasAudioOnlyStream: normalized.hasAudioOnlyStream,
     hasVideoOnlyStream: normalized.hasVideoOnlyStream,
@@ -90,10 +102,6 @@ async function analyzeMedia(url: URL, platform: Platform): Promise<MediaInfo> {
 
 export async function POST(request: Request) {
   try {
-    const clientKey = getClientKey(request.headers);
-    if (!checkRateLimit(`analyze:${clientKey}`, 15, 5 * 60 * 1000)) {
-      throw new AppError("RATE_LIMITED");
-    }
 
     assertBinariesPresent();
 

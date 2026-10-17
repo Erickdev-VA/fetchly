@@ -6,7 +6,7 @@ export function AnalyzingIndicator() {
         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/50 [animation-delay:-0.15s]" />
         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/50" />
       </span>
-      Analyzing link...
+      Analizando enlace…
     </div>
   );
 }

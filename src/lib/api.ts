@@ -1,4 +1,5 @@
 import type { AnalyzeResult, DownloadMode } from "./platform/types";
+import type { Category } from "./library/types";
 
 export class ApiError extends Error {
   code: string;
@@ -12,7 +13,7 @@ async function parseJsonOrThrow<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const code = data?.error?.code ?? "INTERNAL";
-    const message = data?.error?.message ?? "Something went wrong.";
+    const message = data?.error?.message ?? "Algo salió mal.";
     throw new ApiError(code, message);
   }
   return data as T;
@@ -39,13 +40,20 @@ export function startDownload(params: {
   }).then((res) => parseJsonOrThrow<{ jobId: string }>(res));
 }
 
+/** Where a finished download ended up in the library. */
+export interface SavedItem {
+  id: string;
+  category: Category;
+  filePath: string;
+}
+
 export interface DownloadProgress {
-  status: "preparing" | "processing" | "completed" | "error";
+  status: "queued" | "processing" | "completed" | "error";
   percent: number;
   /** True while the file is being re-encoded to H.264/AAC. */
   converting: boolean;
   errorMessage: string | null;
-  fileName: string | null;
+  item: SavedItem | null;
 }
 
 export function getDownloadProgress(jobId: string): Promise<DownloadProgress> {
@@ -54,21 +62,19 @@ export function getDownloadProgress(jobId: string): Promise<DownloadProgress> {
   );
 }
 
-export function getDownloadFileUrl(jobId: string): string {
-  return `/api/download/file/${jobId}`;
-}
-
 export type BatchItemStatus = "queued" | "downloading" | "converting" | "completed" | "error" | "cancelled";
 
 export interface BatchProgress {
   running: boolean;
   cancelled: boolean;
+  category: Category;
   items: {
     entryId: string;
     title: string;
     status: BatchItemStatus;
     percent: number;
     errorMessage: string | null;
+    filePath: string | null;
   }[];
 }
 
@@ -96,12 +102,4 @@ export function cancelBatch(batchId: string): Promise<unknown> {
 
 export function discardBatch(batchId: string): Promise<unknown> {
   return fetch(`/api/batch/${batchId}`, { method: "DELETE" });
-}
-
-export function getBatchZipUrl(batchId: string): string {
-  return `/api/batch/${batchId}/zip`;
-}
-
-export function getBatchItemUrl(batchId: string, entryId: string): string {
-  return `/api/batch/${batchId}/item/${encodeURIComponent(entryId)}`;
 }

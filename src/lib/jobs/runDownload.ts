@@ -2,7 +2,6 @@ import path from "node:path";
 import { readdir, rm, stat } from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
 import { YTDLP_PATH, FFMPEG_PATH } from "../ytdlp/binary";
-import { getCookiesArgs } from "../ytdlp/cookies";
 import { getJsRuntimeArgs, getJsRuntimeEnv } from "../ytdlp/jsRuntime";
 import { getExtractorArgs } from "../ytdlp/extractors";
 import { makeShareable, stripTrack } from "../ytdlp/postprocess";
@@ -60,12 +59,12 @@ function planDownload(
 }
 
 function classifyDownloadError(stderr: string): string {
-  if (/max-filesize/i.test(stderr)) return "This file is too large to download.";
-  if (/private|login required/i.test(stderr)) return "This content is private and can't be accessed.";
+  if (/max-filesize/i.test(stderr)) return "Este archivo es demasiado grande para descargarlo.";
+  if (/private|login required/i.test(stderr)) return "Este contenido es privado y no se puede acceder a él.";
   if (/unavailable|not available|removed|404|does not exist/i.test(stderr)) {
-    return "This content isn't available anymore.";
+    return "Este contenido ya no está disponible.";
   }
-  return "The download failed. Please try again.";
+  return "La descarga falló. Inténtalo de nuevo.";
 }
 
 async function findDownloadedFile(tempDir: string): Promise<string> {
@@ -118,11 +117,11 @@ function runYtDlp(args: string[], opts: RunDownloadOptions, maxPercent: number, 
     child.on("error", (err) => {
       clearTimeout(timer);
       logger.error("failed to spawn yt-dlp", { err: String(err) });
-      reject(new DownloadError("Couldn't start the download."));
+      reject(new DownloadError("No se pudo iniciar la descarga."));
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (timedOut) return reject(new DownloadError("The download took too long and was cancelled."));
+      if (timedOut) return reject(new DownloadError("La descarga tardó demasiado y se canceló."));
       if (code !== 0) {
         logger.error("yt-dlp download failed", { code, stderrTail });
         return reject(new DownloadError(classifyDownloadError(stderrTail)));
@@ -165,7 +164,6 @@ export async function runDownload(opts: RunDownloadOptions): Promise<string> {
     "--socket-timeout",
     "15",
     ...getJsRuntimeArgs(),
-    ...getCookiesArgs(),
     ...getExtractorArgs(),
   ];
   if (plan.needsMerge) args.push("--merge-output-format", "mp4");
@@ -204,6 +202,6 @@ export async function runDownload(opts: RunDownloadOptions): Promise<string> {
     return outPath;
   } catch (err) {
     logger.error("post-processing failed", { err: String(err) });
-    throw new DownloadError("Something went wrong while processing this content.");
+    throw new DownloadError("Algo salió mal al procesar este contenido.");
   }
 }

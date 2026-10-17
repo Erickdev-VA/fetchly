@@ -3,21 +3,22 @@ import type { DownloadState } from "@/hooks/useDownloadJob";
 export function DownloadButton({ state, onClick }: { state: DownloadState; onClick: () => void }) {
   const isBusy =
     state.phase === "starting" ||
-    state.phase === "preparing" ||
+    state.phase === "queued" ||
     state.phase === "processing" ||
     state.phase === "converting";
   const percent =
-    state.phase === "processing" || state.phase === "preparing" || state.phase === "converting"
+    state.phase === "processing" || state.phase === "converting"
       ? state.percent
       : state.phase === "completed"
         ? 100
         : 0;
 
-  let text = "Download";
-  if (state.phase === "starting" || state.phase === "preparing") text = "Preparing…";
-  else if (state.phase === "processing") text = `Downloading ${Math.round(percent)}%`;
-  else if (state.phase === "converting") text = `Converting ${Math.round(percent)}%`;
-  else if (state.phase === "completed") text = "Completed";
+  let text = "Descargar";
+  if (state.phase === "starting") text = "Preparando…";
+  else if (state.phase === "queued") text = "En espera…";
+  else if (state.phase === "processing") text = `Descargando ${Math.round(percent)}%`;
+  else if (state.phase === "converting") text = `Convirtiendo ${Math.round(percent)}%`;
+  else if (state.phase === "completed") text = "Completado";
 
   return (
     <button

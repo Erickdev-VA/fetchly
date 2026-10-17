@@ -10,6 +10,7 @@ import { MediaCard } from "@/components/MediaCard";
 import { PlaylistCard } from "@/components/PlaylistCard";
 import { ShareableToggle } from "@/components/ShareableToggle";
 import { analyzeUrl, ApiError } from "@/lib/api";
+import { CATEGORY_LABEL, categoryForMode } from "@/lib/library/types";
 import type { AnalyzeResult, DownloadMode } from "@/lib/platform/types";
 
 type Status = "idle" | "analyzing" | "ready" | "error";
@@ -34,7 +35,7 @@ export default function Home() {
       setMedia(result);
       setStatus("ready");
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Something went wrong on our end.";
+      const message = err instanceof ApiError ? err.message : "Algo salió mal.";
       setError(message);
       setStatus("error");
     }
@@ -43,19 +44,19 @@ export default function Home() {
   const handlePaste = useCallback(async () => {
     setPasteNotice(null);
     if (!navigator.clipboard || !navigator.clipboard.readText) {
-      setPasteNotice("Automatic paste isn't available in this browser. Paste the link manually instead.");
+      setPasteNotice("No se puede pegar automáticamente. Pega el enlace a mano.");
       return;
     }
     try {
       const text = await navigator.clipboard.readText();
       if (!text.trim()) {
-        setPasteNotice("Your clipboard is empty.");
+        setPasteNotice("El portapapeles está vacío.");
         return;
       }
       setUrl(text);
       void runAnalysis(text);
     } catch {
-      setPasteNotice("Couldn't access the clipboard. Paste the link manually instead.");
+      setPasteNotice("No se pudo acceder al portapapeles. Pega el enlace a mano.");
     }
   }, [runAnalysis]);
 
@@ -75,6 +76,7 @@ export default function Home() {
             disabled={isBusy}
           />
           <ModeToggle value={mode} onChange={setMode} disabled={isBusy} />
+          <p className="text-xs text-white/40">Se guardará en {CATEGORY_LABEL[categoryForMode(mode)]}</p>
           <ShareableToggle value={shareable} onChange={setShareable} disabled={isBusy} />
           {pasteNotice && <p className="text-center text-xs text-white/40">{pasteNotice}</p>}
         </div>
@@ -92,7 +94,7 @@ export default function Home() {
       </main>
 
       <footer className="px-4 pb-6 text-center text-[11px] text-white/25">
-        For content you have the rights to. Please respect each platform&apos;s terms of service.
+        Para contenido sobre el que tienes derechos. Respeta los términos de servicio de cada plataforma.
       </footer>
     </div>
   );
