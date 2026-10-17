@@ -51,3 +51,6 @@ next-env.d.ts
 
 # electron-builder output
 /release/
+
+# desktop server built by scripts/build-desktop.mjs
+/dist-desktop/

@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:desktop": "node scripts/build-desktop.mjs",
     "start": "node scripts/start.mjs",
     "lint": "eslint",
     "postinstall": "node scripts/setup-ytdlp.mjs",
     "electron:start": "electron .",
-    "electron:preview": "npm run build && npm run electron:start",
-    "dist:win": "npm run build && electron-builder --win"
+    "electron:preview": "npm run build:desktop && npm run electron:start",
+    "dist:win": "npm run build:desktop && electron-builder --win"
   },
   "dependencies": {
     "ffmpeg-static": "^5.3.0",
@@ -36,20 +37,23 @@
   "build": {
     "appId": "com.fetchly.desktop",
     "productName": "Fetchly",
-    "asar": false,
+    "asar": true,
     "directories": {
       "output": "release"
     },
     "files": [
-      ".next/**/*",
-      "public/**/*",
       "electron/**/*",
-      "node_modules/**/*",
-      "bin/**/*",
       "package.json",
-      "next.config.ts",
-      "!node_modules/electron/**/*",
-      "!node_modules/electron-builder/**/*"
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-desktop",
+        "to": ".",
+        "filter": [
+          "server/**/*"
+        ]
+      }
     ],
     "win": {
       "target": "nsis"

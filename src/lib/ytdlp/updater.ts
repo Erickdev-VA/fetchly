@@ -10,9 +10,15 @@ import { logger } from "../logger";
  * outdated yt-dlp starts failing with HTTP 403 on downloads even though
  * metadata still loads fine. setup-ytdlp.mjs only fetches the binary once
  * at install time, so a long-running install (the desktop app especially)
- * silently rots. This runs `yt-dlp -U` at server start and then once a day.
+ * silently rots. This runs `yt-dlp -U` shortly after server start and then
+ * once a day.
  */
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// The Windows yt-dlp.exe unpacks a whole Python runtime to %TEMP% on every
+// launch, so running it while the desktop app is still booting competes for
+// disk and CPU with the server and the first page render. Wait until the
+// window is up and idle.
+const STARTUP_DELAY_MS = 15_000;
 const UPDATE_TIMEOUT_MS = 90_000;
 const MARKER_PATH = path.join(path.dirname(YTDLP_PATH), ".last-update-check");
 
@@ -71,7 +77,7 @@ async function checkForUpdate(force = false): Promise<void> {
 export function startYtDlpAutoUpdate(): void {
   if (state.started || process.env.YTDLP_AUTO_UPDATE === "0") return;
   state.started = true;
-  void checkForUpdate();
+  setTimeout(() => void checkForUpdate(), STARTUP_DELAY_MS).unref();
   setInterval(() => void checkForUpdate(true), CHECK_INTERVAL_MS).unref();
 }
 
