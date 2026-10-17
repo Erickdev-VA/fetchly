@@ -21,4 +21,20 @@ contextBridge.exposeInMainWorld("fetchly", {
       return () => ipcRenderer.removeListener("player:command", wrapped);
     },
   },
+  mini: {
+    /** From the main window: opens the mini player (or brings it forward). */
+    open: () => ipcRenderer.send("mini:open"),
+    // The rest only answer the mini player's own window.
+    getState: () => ipcRenderer.invoke("mini:get-state"),
+    /** What's playing, each time it changes. Returns the unsubscribe function. */
+    onState: (listener) => {
+      const wrapped = (_event, state) => listener(state);
+      ipcRenderer.on("mini:state", wrapped);
+      return () => ipcRenderer.removeListener("mini:state", wrapped);
+    },
+    command: (command) => ipcRenderer.send("mini:command", command),
+    setPinned: (pinned) => ipcRenderer.invoke("mini:set-pinned", pinned),
+    close: () => ipcRenderer.send("mini:close"),
+    showApp: () => ipcRenderer.send("mini:show-app"),
+  },
 });

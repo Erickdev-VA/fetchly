@@ -371,7 +371,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (command.type === "toggle") a.toggle();
       else if (command.type === "next") a.next();
       else if (command.type === "previous") a.previous();
-      else a.seek(command.seconds);
+      else if (command.type === "seek") a.seek(command.seconds);
+      else if (command.type === "volume") a.setVolume(command.volume);
+      else a.toggleMute();
     });
   }, []);
 

@@ -29,13 +29,15 @@ export type RepeatMode = "off" | "all" | "one";
 
 /**
  * Commands that arrive from outside the page: the taskbar thumbnail
- * buttons, the tray menu and (later) the mini player.
+ * buttons, the tray menu and the mini player.
  */
 export type PlayerCommand =
   | { type: "toggle" }
   | { type: "next" }
   | { type: "previous" }
-  | { type: "seek"; seconds: number };
+  | { type: "seek"; seconds: number }
+  | { type: "volume"; volume: number }
+  | { type: "toggleMute" };
 
 /**
  * What the page tells Electron after every change, so the taskbar, tray
@@ -59,7 +61,8 @@ export interface PlayerSnapshot {
 
 export function isPlayerCommand(value: unknown): value is PlayerCommand {
   if (typeof value !== "object" || value === null) return false;
-  const { type, seconds } = value as { type?: unknown; seconds?: unknown };
+  const { type, seconds, volume } = value as { type?: unknown; seconds?: unknown; volume?: unknown };
   if (type === "seek") return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0;
-  return type === "toggle" || type === "next" || type === "previous";
+  if (type === "volume") return typeof volume === "number" && volume >= 0 && volume <= 1;
+  return type === "toggle" || type === "next" || type === "previous" || type === "toggleMute";
 }

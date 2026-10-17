@@ -34,6 +34,14 @@ body {
   }
 }
 
+/* Frameless windows (the mini player): what can drag the window, and what can't. */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
 /* Progress and volume sliders in the playback bar (Chromium only: Electron). */
 .fetchly-range {
   -webkit-appearance: none;

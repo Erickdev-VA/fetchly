@@ -1,5 +1,6 @@
 "use client";
 
+import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
 import { LibraryThumb } from "../library/LibraryThumb";
 import { PlayerIcon, type PlayerIconName } from "./PlayerIcon";
@@ -132,6 +133,7 @@ export function PlayerBar() {
           className="hidden w-24 lg:block"
         />
         <IconButton icon="queue" label="Cola" active={queueOpen} onClick={() => setQueueOpen(!queueOpen)} />
+        <IconButton icon="mini" label="Mini reproductor" onClick={() => desktop()?.mini.open()} />
       </div>
     </footer>
   );

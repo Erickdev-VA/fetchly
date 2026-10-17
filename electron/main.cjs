@@ -7,7 +7,7 @@
 //   by scripts/build-desktop.mjs, run in a utility process on Electron's
 //   bundled Node, so end users don't need Node/npm installed.
 // - `npm run dev` (FETCHLY_DEV=1): `next dev` with hot reload.
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell, utilityProcess } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, screen, shell, utilityProcess } = require("electron");
 const path = require("node:path");
 const net = require("node:net");
 const fs = require("node:fs");
@@ -16,8 +16,13 @@ const { mediaIcons } = require("./media-icons.cjs");
 
 // "Fetchly" instead of the npm package name for %APPDATA%\Fetchly. Must run
 // before anything reads userData (the single-instance lock included).
+// FETCHLY_TEST_PROFILE=1 (never in the installed app) swaps in a separate
+// "Fetchly-test" profile and library, so tests can run beside the real
+// Fetchly without touching the user's songs.
+const testProfile = process.env.FETCHLY_TEST_PROFILE === "1" && !app.isPackaged;
+const profileName = testProfile ? "Fetchly-test" : "Fetchly";
 app.setName("Fetchly");
-app.setPath("userData", path.join(app.getPath("appData"), "Fetchly"));
+app.setPath("userData", path.join(app.getPath("appData"), profileName));
 
 // Chromium pauses muted media in a window that's hidden or covered by other
 // windows ("to save power"). Fetchly's music lives in exactly such a window
@@ -38,13 +43,14 @@ const projectRoot = path.join(__dirname, "..");
 const serverDir = app.isPackaged ? path.join(process.resourcesPath, "server") : path.join(projectRoot, "dist-desktop", "server");
 
 const dataDir = app.getPath("userData");
-const libraryDir = path.join(app.getPath("documents"), "Fetchly");
+const libraryDir = path.join(app.getPath("documents"), profileName);
 // Keep in sync with src/lib/library/paths.ts.
 const CATEGORY_DIRS = { music: "Música", video: "Videos" };
 
 const statePath = path.join(dataDir, "desktop-state.json");
 
 let mainWindow = null;
+let miniWindow = null;
 let tray = null;
 let serverProcess = null;
 let serverReady = false;
@@ -238,6 +244,7 @@ function createWindow() {
     // Its music stopped with it.
     playerState = null;
     updateTrayMenu();
+    sendToMini();
   });
   // Windows drops the thumbnail buttons whenever the window is hidden.
   mainWindow.on("show", updateThumbar);
@@ -266,23 +273,44 @@ function createTray() {
 // The music plays in the main window's page. These only send it commands
 // and show what it last reported.
 
-function sendPlayerCommand(type) {
-  mainWindow?.webContents.send("player:command", { type });
+function sendPlayerCommand(command) {
+  mainWindow?.webContents.send("player:command", typeof command === "string" ? { type: command } : command);
 }
 
-/** Keeps only the fields the main process uses, with the right types. */
+const finiteNumber = (value, fallback) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
+
+/** The page's PlayerSnapshot, keeping only known fields with the right types. */
 function readSnapshot(value) {
   if (typeof value !== "object" || value === null) return null;
   const track = value.track;
+  const duration = finiteNumber(value.duration, null);
   return {
     track:
-      typeof track === "object" && track !== null && typeof track.title === "string"
-        ? { title: track.title.slice(0, 200), artist: typeof track.artist === "string" ? track.artist.slice(0, 200) : null }
+      typeof track === "object" && track !== null && typeof track.title === "string" && typeof track.id === "string"
+        ? {
+            id: track.id.slice(0, 64),
+            title: track.title.slice(0, 200),
+            artist: typeof track.artist === "string" ? track.artist.slice(0, 200) : null,
+            hasThumbnail: track.hasThumbnail === true,
+          }
         : null,
     playing: value.playing === true,
+    position: Math.max(0, finiteNumber(value.position, 0)),
+    positionAt: finiteNumber(value.positionAt, Date.now()),
+    duration: duration !== null && duration > 0 ? duration : null,
+    volume: Math.min(1, Math.max(0, finiteNumber(value.volume, 1))),
+    muted: value.muted === true,
+    shuffle: value.shuffle === true,
+    repeat: ["off", "all", "one"].includes(value.repeat) ? value.repeat : "off",
     hasPrevious: value.hasPrevious === true,
     hasNext: value.hasNext === true,
   };
+}
+
+/** What the taskbar buttons and the tray menu show; they're rebuilt only when this changes. */
+function controlsKey(state) {
+  if (!state?.track) return "";
+  return JSON.stringify([state.track.title, state.track.artist, state.playing, state.hasPrevious, state.hasNext]);
 }
 
 function updateThumbar() {
@@ -332,11 +360,161 @@ function updateTrayMenu() {
 ipcMain.on("player:state", (event, value) => {
   if (!fromApp(event) || event.sender !== mainWindow?.webContents) return;
   const next = readSnapshot(value);
-  // Only rebuild the menu and buttons when something they show changed.
-  if (JSON.stringify(next) === JSON.stringify(playerState)) return;
+  const controlsChanged = controlsKey(next) !== controlsKey(playerState);
   playerState = next;
-  updateThumbar();
-  updateTrayMenu();
+  sendToMini();
+  if (controlsChanged) {
+    updateThumbar();
+    updateTrayMenu();
+  }
+});
+
+// --- mini player: a small always-on-top remote control ---------------------
+// It never plays anything itself: it mirrors playerState and sends commands
+// to the main window, which keeps the only <audio>.
+
+const MINI_DEFAULT_SIZE = { width: 400, height: 128 };
+const MINI_MIN_SIZE = { width: 200, height: 72 };
+const MINI_MARGIN = 24;
+
+function miniPinned() {
+  return readState().miniPinned !== false;
+}
+
+/** The saved bounds if they're still on a connected screen, else the bottom-right corner of the main one. */
+function miniBounds() {
+  const saved = readState().miniBounds;
+  if (saved && [saved.x, saved.y, saved.width, saved.height].every((n) => Number.isFinite(n))) {
+    const width = Math.max(MINI_MIN_SIZE.width, Math.round(saved.width));
+    const height = Math.max(MINI_MIN_SIZE.height, Math.round(saved.height));
+    const bounds = { x: Math.round(saved.x), y: Math.round(saved.y), width, height };
+    // Enough of it, the top edge included, must be on some screen to grab it.
+    const visible = screen.getAllDisplays().some(({ workArea: a }) => {
+      const overlapX = Math.min(bounds.x + width, a.x + a.width) - Math.max(bounds.x, a.x);
+      const topInside = bounds.y >= a.y && bounds.y < a.y + a.height - 32;
+      return topInside && overlapX >= 80;
+    });
+    if (visible) return bounds;
+  }
+  const { workArea } = screen.getPrimaryDisplay();
+  const width = Math.min(saved?.width > 0 ? Math.round(saved.width) : MINI_DEFAULT_SIZE.width, workArea.width - MINI_MARGIN * 2);
+  const height = Math.min(saved?.height > 0 ? Math.round(saved.height) : MINI_DEFAULT_SIZE.height, workArea.height - MINI_MARGIN * 2);
+  return {
+    x: workArea.x + workArea.width - width - MINI_MARGIN,
+    y: workArea.y + workArea.height - height - MINI_MARGIN,
+    width: Math.max(MINI_MIN_SIZE.width, width),
+    height: Math.max(MINI_MIN_SIZE.height, height),
+  };
+}
+
+function sendToMini() {
+  miniWindow?.webContents.send("mini:state", playerState);
+}
+
+function openMini() {
+  if (miniWindow) {
+    miniWindow.show();
+    miniWindow.focus();
+    return;
+  }
+  const pinned = miniPinned();
+  const bounds = miniBounds();
+  miniWindow = new BrowserWindow({
+    ...bounds,
+    minWidth: MINI_MIN_SIZE.width,
+    minHeight: MINI_MIN_SIZE.height,
+    frame: false,
+    show: false,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: pinned,
+    title: "Fetchly · Mini reproductor",
+    icon: path.join(__dirname, "assets", "icon.png"),
+    backgroundColor: "#121216",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  // With display scaling (125 %, say) a frameless window comes out a few
+  // pixels bigger than asked, so it would grow on every reopen. Ask again,
+  // minus the difference.
+  miniWindow.setBounds(bounds);
+  const actual = miniWindow.getBounds();
+  if (actual.width !== bounds.width || actual.height !== bounds.height) {
+    miniWindow.setBounds({
+      ...bounds,
+      width: bounds.width - (actual.width - bounds.width),
+      height: bounds.height - (actual.height - bounds.height),
+    });
+  }
+  // "floating" keeps it above normal windows without covering menus and the like.
+  if (pinned) miniWindow.setAlwaysOnTop(true, "floating");
+  miniWindow.once("ready-to-show", () => miniWindow?.show());
+
+  const saveBounds = () => {
+    if (miniWindow && !miniWindow.isDestroyed()) writeState({ miniBounds: miniWindow.getBounds() });
+  };
+  miniWindow.on("moved", saveBounds);
+  miniWindow.on("resized", saveBounds);
+  miniWindow.on("close", saveBounds);
+  miniWindow.on("closed", () => {
+    miniWindow = null;
+  });
+
+  miniWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  miniWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith(`${APP_ORIGIN}/mini`)) event.preventDefault();
+  });
+  miniWindow.loadURL(`${APP_ORIGIN}/mini`);
+}
+
+function fromMini(event) {
+  return fromApp(event) && event.sender === miniWindow?.webContents;
+}
+
+/** The commands the mini may send, rebuilt so nothing else rides along. */
+function readMiniCommand(value) {
+  if (typeof value !== "object" || value === null) return null;
+  if (["toggle", "next", "previous", "toggleMute"].includes(value.type)) return { type: value.type };
+  if (value.type === "seek" && Number.isFinite(value.seconds) && value.seconds >= 0) return { type: "seek", seconds: value.seconds };
+  if (value.type === "volume" && Number.isFinite(value.volume)) return { type: "volume", volume: Math.min(1, Math.max(0, value.volume)) };
+  return null;
+}
+
+ipcMain.on("mini:open", (event) => {
+  if (fromApp(event) && event.sender === mainWindow?.webContents) openMini();
+});
+
+ipcMain.handle("mini:get-state", (event) => {
+  if (!fromMini(event)) return null;
+  return { player: playerState, pinned: miniPinned() };
+});
+
+ipcMain.on("mini:command", (event, value) => {
+  if (!fromMini(event)) return;
+  const command = readMiniCommand(value);
+  if (command) sendPlayerCommand(command);
+});
+
+ipcMain.handle("mini:set-pinned", (event, pinned) => {
+  if (!fromMini(event) || typeof pinned !== "boolean") return miniPinned();
+  writeState({ miniPinned: pinned });
+  miniWindow.setAlwaysOnTop(pinned, "floating");
+  return pinned;
+});
+
+ipcMain.on("mini:close", (event) => {
+  if (fromMini(event)) miniWindow.close();
+});
+
+ipcMain.on("mini:show-app", (event) => {
+  if (fromMini(event)) showMainWindow();
 });
 
 // --- IPC: the functions preload.cjs exposes to the page -------------------
