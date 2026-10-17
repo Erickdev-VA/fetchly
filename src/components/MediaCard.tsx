@@ -106,7 +106,9 @@ export function MediaCard({
           </div>
 
           {state.phase === "error" && <p className="text-xs text-red-300">{state.message}</p>}
-          {saved && state.phase !== "error" && <SavedNotice category={saved.category} filePath={saved.filePath} />}
+          {saved && state.phase !== "error" && (
+            <SavedNotice category={saved.category} filePath={saved.filePath} itemId={saved.id} />
+          )}
         </div>
       </div>
     </div>

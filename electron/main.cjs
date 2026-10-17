@@ -16,10 +16,10 @@ const { mediaIcons } = require("./media-icons.cjs");
 
 // "Fetchly" instead of the npm package name for %APPDATA%\Fetchly. Must run
 // before anything reads userData (the single-instance lock included).
-// FETCHLY_TEST_PROFILE=1 (never in the installed app) swaps in a separate
-// "Fetchly-test" profile and library, so tests can run beside the real
-// Fetchly without touching the user's songs.
-const testProfile = process.env.FETCHLY_TEST_PROFILE === "1" && !app.isPackaged;
+// FETCHLY_TEST_PROFILE=1 swaps in a separate "Fetchly-test" profile and
+// library (and, packaged, its own port), so tests can run beside the real
+// Fetchly without touching the user's songs. Nothing sets it for users.
+const testProfile = process.env.FETCHLY_TEST_PROFILE === "1";
 const profileName = testProfile ? "Fetchly-test" : "Fetchly";
 app.setName("Fetchly");
 app.setPath("userData", path.join(app.getPath("appData"), profileName));
@@ -34,7 +34,7 @@ app.commandLine.appendSwitch("disable-background-media-suspend");
 app.commandLine.appendSwitch("enable-features", "MediaSessionService,HardwareMediaKeyHandling");
 
 const isDev = process.env.FETCHLY_DEV === "1" && !app.isPackaged;
-const PORT = Number(process.env.MEDIA_DOWNLOADER_PORT || (isDev ? 47824 : 47823));
+const PORT = Number(process.env.MEDIA_DOWNLOADER_PORT || (isDev ? 47824 : testProfile ? 47833 : 47823));
 const HOST = "127.0.0.1";
 const APP_ORIGIN = `http://${HOST}:${PORT}`;
 const SERVER_START_TIMEOUT_MS = isDev ? 120_000 : 60_000;
