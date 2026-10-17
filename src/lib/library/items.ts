@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { getDb } from "./db";
 import type { Category, LibraryItem } from "./types";
 import type { Platform } from "../platform/types";
@@ -32,6 +33,19 @@ function fromRow(row: ItemRow): LibraryItem {
   };
 }
 
+// See the comment in lib/jobs/downloadJobs.ts about pinning state to globalThis.
+const globalStore = globalThis as unknown as { __fetchlyLibraryRevision?: { boot: string; count: number } };
+const revisionState = (globalStore.__fetchlyLibraryRevision ??= { boot: randomUUID().slice(0, 8), count: 0 });
+
+/**
+ * Changes whenever an item is added or removed, so open pages can tell
+ * cheaply that their list is stale. The boot id keeps a restarted server
+ * from repeating a value a page already saw.
+ */
+export function libraryRevision(): string {
+  return `${revisionState.boot}-${revisionState.count}`;
+}
+
 export function insertItem(item: LibraryItem): void {
   getDb()
     .prepare(
@@ -52,6 +66,7 @@ export function insertItem(item: LibraryItem): void {
       item.thumbnailFile,
       item.createdAt,
     );
+  revisionState.count++;
 }
 
 export function getItem(id: string): LibraryItem | null {
@@ -65,4 +80,11 @@ export function listItems(category: Category): LibraryItem[] {
     .prepare("SELECT * FROM items WHERE category = ? ORDER BY created_at DESC")
     .all(category) as unknown as ItemRow[];
   return rows.map(fromRow);
+}
+
+/** Removes the entry (not the file). Returns false if there was none. */
+export function deleteItem(id: string): boolean {
+  const { changes } = getDb().prepare("DELETE FROM items WHERE id = ?").run(id);
+  if (changes > 0) revisionState.count++;
+  return changes > 0;
 }

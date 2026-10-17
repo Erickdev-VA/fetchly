@@ -1,5 +1,5 @@
 import type { AnalyzeResult, DownloadMode } from "./platform/types";
-import type { Category } from "./library/types";
+import type { Category, LibraryEntry } from "./library/types";
 
 export class ApiError extends Error {
   code: string;
@@ -102,4 +102,28 @@ export function cancelBatch(batchId: string): Promise<unknown> {
 
 export function discardBatch(batchId: string): Promise<unknown> {
   return fetch(`/api/batch/${batchId}`, { method: "DELETE" });
+}
+
+export function fetchLibrary(category: Category): Promise<{ revision: string; items: LibraryEntry[] }> {
+  return fetch(`/api/library?category=${category}`, { cache: "no-store" }).then((res) =>
+    parseJsonOrThrow<{ revision: string; items: LibraryEntry[] }>(res),
+  );
+}
+
+export function fetchLibraryRevision(): Promise<{ revision: string }> {
+  return fetch("/api/library/revision", { cache: "no-store" }).then((res) => parseJsonOrThrow<{ revision: string }>(res));
+}
+
+/** Forgets an item; its file must already be in the Recycle Bin (or gone). */
+export async function deleteLibraryItem(id: string): Promise<void> {
+  const res = await fetch(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) await parseJsonOrThrow(res);
+}
+
+export function libraryMediaUrl(id: string): string {
+  return `/api/library/media/${encodeURIComponent(id)}`;
+}
+
+export function libraryThumbnailUrl(id: string): string {
+  return `/api/library/thumbnail/${encodeURIComponent(id)}`;
 }

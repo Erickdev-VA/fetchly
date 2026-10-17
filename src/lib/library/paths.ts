@@ -29,3 +29,9 @@ export function dataDir(): string {
 export function thumbnailsDir(): string {
   return path.join(dataDir(), "thumbnails");
 }
+
+/** True if `filePath` is somewhere under the library folder (not the folder itself). */
+export function isInsideLibrary(filePath: string): boolean {
+  const relative = path.relative(libraryRoot(), path.resolve(filePath));
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}

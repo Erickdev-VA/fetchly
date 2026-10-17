@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld("fetchly", {
   openLibraryFolder: (category) => ipcRenderer.invoke("library:open-folder", category),
   /** Opens Explorer with the file selected. */
   showItemInFolder: (filePath) => ipcRenderer.invoke("library:show-item", filePath),
+  /** Sends a library file to the Recycle Bin. */
+  trashItem: (filePath) => ipcRenderer.invoke("library:trash-item", filePath),
 });

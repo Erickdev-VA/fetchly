@@ -1,4 +1,5 @@
-export function Logo() {
+/** `compact`: the name only shows from 1024px up, like the menu labels. */
+export function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
       <svg width="30" height="30" viewBox="0 0 32 32" fill="none" aria-hidden>
@@ -12,7 +13,9 @@ export function Logo() {
         />
         <path d="M10.5 23h11" stroke="var(--accent)" strokeWidth="1.7" strokeLinecap="round" />
       </svg>
-      <span className="text-[15px] font-semibold tracking-tight text-white">Fetchly</span>
+      <span className={`text-[15px] font-semibold tracking-tight text-white ${compact ? "hidden lg:inline" : ""}`}>
+        Fetchly
+      </span>
     </div>
   );
 }

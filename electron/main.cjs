@@ -269,6 +269,21 @@ ipcMain.handle("library:show-item", (event, filePath) => {
   return true;
 });
 
+// True once the file is in the Recycle Bin, or if it was already gone (moved
+// or deleted outside the app); the page then drops it from the library.
+ipcMain.handle("library:trash-item", async (event, filePath) => {
+  if (!fromApp(event) || !insideLibrary(filePath)) return false;
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) return true;
+  try {
+    await shell.trashItem(resolved);
+    return true;
+  } catch (err) {
+    console.error("Moving to the Recycle Bin failed:", err);
+    return false;
+  }
+});
+
 // --- lifecycle --------------------------------------------------------------
 
 const gotLock = app.requestSingleInstanceLock();

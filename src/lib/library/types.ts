@@ -28,3 +28,19 @@ export interface LibraryItem {
   thumbnailFile: string | null;
   createdAt: number;
 }
+
+/** A library item as the page sees it (GET /api/library). */
+export interface LibraryEntry {
+  id: string;
+  title: string;
+  artist: string | null;
+  durationSeconds: number | null;
+  platform: Platform | null;
+  /** Needed for "Mostrar en carpeta" and the Recycle Bin, both done by Electron. */
+  filePath: string;
+  fileSize: number;
+  createdAt: number;
+  hasThumbnail: boolean;
+  /** The file was moved or deleted outside the app. */
+  missing: boolean;
+}

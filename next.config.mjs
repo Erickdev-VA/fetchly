@@ -4,6 +4,8 @@
 
 /** @type {import("next").NextConfig} */
 const nextConfig = {
+  // The default bottom-left spot sits on top of the playback bar.
+  devIndicators: { position: "top-right" },
   // scripts/build-desktop.mjs sets this to get a self-contained server with
   // only the node_modules it actually needs, instead of shipping the whole
   // 400MB+ node_modules folder.

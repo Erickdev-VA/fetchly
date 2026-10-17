@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Logo } from "@/components/Logo";
+import { PageHeader } from "@/components/shell/PageHeader";
 import { UrlInputBar } from "@/components/UrlInputBar";
 import { ModeToggle } from "@/components/ModeToggle";
 import { AnalyzingIndicator } from "@/components/AnalyzingIndicator";
@@ -15,7 +15,7 @@ import type { AnalyzeResult, DownloadMode } from "@/lib/platform/types";
 
 type Status = "idle" | "analyzing" | "ready" | "error";
 
-export default function Home() {
+export default function DownloadPage() {
   const [url, setUrl] = useState("");
   const [mode, setMode] = useState<DownloadMode>("auto");
   const [status, setStatus] = useState<Status>("idle");
@@ -63,9 +63,11 @@ export default function Home() {
   const isBusy = status === "analyzing";
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <main className="flex flex-1 flex-col items-center justify-center gap-8 px-4 py-16 sm:px-6">
-        <Logo />
+    <div className="flex min-h-full flex-col">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center gap-8 px-6 py-8">
+        <div className="w-full">
+          <PageHeader title="Descargar" subtitle="Pega un enlace de YouTube, TikTok, Instagram o X." />
+        </div>
 
         <div className="flex w-full max-w-xl flex-col items-center gap-3">
           <UrlInputBar
@@ -91,9 +93,9 @@ export default function Home() {
             <PlaylistCard key={media.analysisId} playlist={media} mode={mode} shareable={shareable} />
           )}
         </div>
-      </main>
+      </div>
 
-      <footer className="px-4 pb-6 text-center text-[11px] text-white/25">
+      <footer className="px-6 pb-6 text-center text-[11px] text-white/25">
         Para contenido sobre el que tienes derechos. Respeta los términos de servicio de cada plataforma.
       </footer>
     </div>

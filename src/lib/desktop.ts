@@ -5,6 +5,8 @@ interface FetchlyBridge {
   isDesktop: true;
   openLibraryFolder(category: Category): Promise<boolean>;
   showItemInFolder(filePath: string): Promise<boolean>;
+  /** True once the file is in the Recycle Bin or was already gone. */
+  trashItem(filePath: string): Promise<boolean>;
 }
 
 declare global {
