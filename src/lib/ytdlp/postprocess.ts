@@ -150,3 +150,58 @@ export async function makeShareable(
   });
   return outPath;
 }
+
+export interface MediaTags {
+  title: string | null;
+  artist: string | null;
+  durationSeconds: number | null;
+  hasAudio: boolean;
+  /** A real video track (an embedded cover picture doesn't count). */
+  hasVideo: boolean;
+  /** An embedded cover picture, as many MP3 and M4A files carry. */
+  hasCover: boolean;
+}
+
+/** Title, artist and what's inside a file, from the `ffmpeg -i` banner (for "Importar carpeta"). */
+export async function readMediaTags(inputPath: string): Promise<MediaTags> {
+  const text = await runFfmpeg(["-hide_banner", "-i", inputPath]).catch((err: Error) => err.message);
+  // The file's own tags are indented 4 spaces under "Input #0"; stream tags are deeper.
+  const tag = (...names: string[]) => {
+    for (const name of names) {
+      const match = text.match(new RegExp(`^ {4}${name}\\s*: (.+)$`, "mi"));
+      const value = match?.[1].trim();
+      if (value) return value.slice(0, 300);
+    }
+    return null;
+  };
+  const duration = text.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
+  const videoStreams = text.match(/Stream #\S+.*?: Video: [^\n]*/g) ?? [];
+  return {
+    title: tag("title"),
+    artist: tag("artist", "album_artist", "author", "composer"),
+    durationSeconds: duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : null,
+    hasAudio: /Stream #\S+.*?: Audio: /.test(text),
+    hasVideo: videoStreams.some((line) => !/attached pic/.test(line)),
+    hasCover: videoStreams.some((line) => /attached pic/.test(line)),
+  };
+}
+
+/**
+ * Saves a cover for an imported file as a JPEG: the embedded picture of an
+ * audio file, or a frame from a tenth of the way into a video. Resolves to
+ * false when there's nothing to take it from.
+ */
+export async function extractCover(
+  inputPath: string,
+  outputPath: string,
+  source: { kind: "embedded" } | { kind: "frame"; atSeconds: number },
+): Promise<boolean> {
+  const args =
+    source.kind === "embedded"
+      ? ["-y", "-i", inputPath, "-an", "-map", "0:v:0", "-frames:v", "1", "-vf", "scale='min(640,iw)':-2", outputPath]
+      : ["-y", "-ss", String(source.atSeconds), "-i", inputPath, "-an", "-frames:v", "1", "-vf", "scale='min(640,iw)':-2", outputPath];
+  return runFfmpeg(args).then(
+    () => true,
+    () => false,
+  );
+}

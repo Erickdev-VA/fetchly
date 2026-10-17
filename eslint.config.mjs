@@ -16,11 +16,14 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".next-desktop/**",
+    ".next-build/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
     // electron-builder output (a full copy of node_modules, .next, etc.)
     "release/**",
+    "dist-desktop/**",
   ]),
 ]);
 

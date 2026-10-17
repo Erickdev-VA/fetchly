@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { AppError } from "../errors";
 import { logger } from "../logger";
 import { YTDLP_PATH, FFMPEG_PATH } from "./binary";
-import { getCookiesArgs } from "./cookies";
 import { getJsRuntimeArgs, getJsRuntimeEnv } from "./jsRuntime";
 import { getExtractorArgs } from "./extractors";
 import { killProcessTree } from "./process";
@@ -10,9 +9,13 @@ import { waitForYtDlpUpdate } from "./updater";
 import type { RawYtDlpInfo, RawYtDlpPlaylist } from "./rawTypes";
 
 const INFO_TIMEOUT_MS = 25_000;
-const PLAYLIST_TIMEOUT_MS = 60_000;
-const MAX_BUFFER_BYTES = 15 * 1024 * 1024;
-export const MAX_PLAYLIST_ENTRIES = 300;
+// yt-dlp pages through a playlist 100 videos at a time, so a 1000-video
+// list takes about ten round trips to YouTube.
+const PLAYLIST_TIMEOUT_MS = 180_000;
+// A flat entry (title, author, thumbnail list) is a few KB of JSON.
+const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+/** How many videos of a playlist are listed, and so how many one batch can download. */
+export const MAX_PLAYLIST_ENTRIES = 1000;
 
 async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
   await waitForYtDlpUpdate();
@@ -28,7 +31,6 @@ async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
         "--ffmpeg-location",
         FFMPEG_PATH,
         ...getJsRuntimeArgs(),
-        ...getCookiesArgs(),
         ...getExtractorArgs(),
         ...args,
       ],
@@ -40,7 +42,7 @@ async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
       (error, stdout, stderr) => {
         clearTimeout(timer);
         if (timedOut) {
-          reject(new AppError("METADATA_FAILED", "Fetching information took too long."));
+          reject(new AppError("METADATA_FAILED", "Obtener la información tardó demasiado."));
           return;
         }
         if (!error) {
@@ -57,7 +59,7 @@ async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
 
         if (/no video could be found|no suitable extractor|unsupported url/i.test(text)) {
           // e.g. a tweet that's only text/images, or one linking elsewhere.
-          reject(new AppError("CONTENT_UNAVAILABLE", "This post doesn't contain a video that can be downloaded."));
+          reject(new AppError("CONTENT_UNAVAILABLE", "Esta publicación no contiene un video que se pueda descargar."));
         } else if (/private|login required|rate-?limit/i.test(text)) {
           reject(new AppError("CONTENT_PRIVATE"));
         } else if (/unavailable|not available|removed|404|does not exist/i.test(text)) {

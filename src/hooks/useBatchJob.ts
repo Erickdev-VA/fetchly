@@ -5,19 +5,19 @@ import {
   startBatch,
   getBatchProgress,
   cancelBatch,
+  resumeBatch,
   discardBatch,
-  getBatchZipUrl,
-  getBatchItemUrl,
   ApiError,
   type BatchProgress,
+  type SaveTargetRequest,
 } from "@/lib/api";
 import type { DownloadMode } from "@/lib/platform/types";
 
 export type BatchState =
   | { phase: "idle" }
   | { phase: "starting" }
-  | { phase: "running"; batchId: string; progress: BatchProgress | null }
-  | { phase: "done"; batchId: string; progress: BatchProgress }
+  | { phase: "running"; batchId: string; playlistId: string | null; progress: BatchProgress | null }
+  | { phase: "done"; batchId: string; playlistId: string | null; progress: BatchProgress }
   | { phase: "error"; message: string };
 
 const POLL_INTERVAL_MS = 1000;
@@ -41,8 +41,9 @@ export function useBatchJob() {
     setState({ phase: "idle" });
   }, [stopPolling]);
 
-  // Free the server's temp files if the user navigates to another link.
-  useEffect(() => () => reset(), [reset]);
+  // Opening another link doesn't cancel a playlist that's downloading: it
+  // keeps going on the server and each video still lands in the library.
+  useEffect(() => stopPolling, [stopPolling]);
 
   const start = useCallback(
     async (params: {
@@ -51,34 +52,31 @@ export function useBatchJob() {
       mode: DownloadMode;
       height: number | "best";
       shareable: boolean;
+      target?: SaveTargetRequest;
     }) => {
       stopPolling();
       setState({ phase: "starting" });
       try {
-        const { batchId } = await startBatch(params);
+        const { batchId, playlistId } = await startBatch(params);
         batchIdRef.current = batchId;
-        setState({ phase: "running", batchId, progress: null });
+        setState({ phase: "running", batchId, playlistId, progress: null });
 
         pollRef.current = window.setInterval(async () => {
           try {
             const progress = await getBatchProgress(batchId);
             if (progress.running) {
-              setState({ phase: "running", batchId, progress });
+              setState({ phase: "running", batchId, playlistId, progress });
               return;
             }
             stopPolling();
-            setState({ phase: "done", batchId, progress });
-            const done = progress.items.filter((i) => i.status === "completed");
-            // One file doesn't need a ZIP around it.
-            if (done.length === 1) window.location.assign(getBatchItemUrl(batchId, done[0].entryId));
-            else if (done.length > 1) window.location.assign(getBatchZipUrl(batchId));
+            setState({ phase: "done", batchId, playlistId, progress });
           } catch {
             stopPolling();
-            setState({ phase: "error", message: "Lost connection while downloading." });
+            setState({ phase: "error", message: "Se perdió la conexión durante la descarga." });
           }
         }, POLL_INTERVAL_MS);
       } catch (err) {
-        const message = err instanceof ApiError ? err.message : "Couldn't start the download.";
+        const message = err instanceof ApiError ? err.message : "No se pudo iniciar la descarga.";
         setState({ phase: "error", message });
       }
     },
@@ -89,5 +87,9 @@ export function useBatchJob() {
     if (batchIdRef.current) void cancelBatch(batchIdRef.current);
   }, []);
 
-  return { state, start, cancel, reset };
+  const resume = useCallback(() => {
+    if (batchIdRef.current) void resumeBatch(batchIdRef.current);
+  }, []);
+
+  return { state, start, cancel, resume, reset };
 }

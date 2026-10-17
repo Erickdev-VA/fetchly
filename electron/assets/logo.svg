@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Pista's app icon. Same shapes as LogoMark in src/components/Logo.tsx; scripts/make-icons.mjs renders the PNGs from it. -->
+  <rect width="100" height="100" rx="22" fill="#6d5dfc"/>
+  <rect x="31" y="11.8" width="9.4" height="68.7" rx="4.7" fill="#fff"/>
+  <path fill-rule="evenodd" fill="#fff" d="M57.6 15.1a20.2 20.2 0 1 1 0 40.4a20.2 20.2 0 1 1 0-40.4ZM56.5 27.5a7.8 7.8 0 1 0 0 15.6a7.8 7.8 0 1 0 0-15.6Z"/>
+</svg>

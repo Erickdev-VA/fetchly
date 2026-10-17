@@ -1,19 +1,23 @@
-const COMBINING_DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
 const RESERVED_CHARS = /[\\/:*?"<>|\x00-\x1f]/g;
+const WINDOWS_DEVICE_NAMES = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
+const MAX_LENGTH = 120;
 
 /**
- * Sanitizes a title for use as a suggested download filename (Content-Disposition).
- * This is never used to build an actual filesystem path — on-disk paths always
- * live under a server-generated UUID job directory.
+ * Turns a video title into a file name stem (no extension) for the library.
+ * Accents and other Unicode stay, so "Canción" remains "Canción"; path
+ * separators and every character Windows rejects are replaced, so the
+ * result can never point outside the folder it's joined to.
  */
-export function sanitizeFilename(name: string, fallback = "download"): string {
+export function safeFileStem(name: string, fallback = "Sin título"): string {
   const cleaned = name
-    .normalize("NFKD")
-    .replace(COMBINING_DIACRITICS, "")
+    .normalize("NFC")
     .replace(RESERVED_CHARS, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/^\.+/, "");
-  const truncated = cleaned.slice(0, 120).trim();
-  return truncated.length ? truncated : fallback;
+    .replace(/^[.\s]+/, "");
+  // Cut by code points so an emoji isn't split in half; Windows also
+  // rejects names ending in a dot or a space.
+  const stem = Array.from(cleaned).slice(0, MAX_LENGTH).join("").replace(/[. ]+$/, "");
+  if (!stem || WINDOWS_DEVICE_NAMES.test(stem)) return fallback;
+  return stem;
 }

@@ -1,31 +1,29 @@
 {
   "name": "media-downloader",
   "version": "0.1.0",
+  "description": "Descarga música y videos y escúchalos en tu biblioteca.",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "node scripts/start.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build:desktop": "node scripts/build-desktop.mjs",
     "lint": "eslint",
     "postinstall": "node scripts/setup-ytdlp.mjs",
     "electron:start": "electron .",
-    "electron:preview": "npm run build && npm run electron:start",
-    "dist:win": "npm run build && electron-builder --win"
+    "electron:preview": "npm run build:desktop && npm run electron:start",
+    "dist:win": "npm run build:desktop && electron-builder --win"
   },
   "dependencies": {
     "ffmpeg-static": "^5.3.0",
     "next": "16.3.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "yazl": "^3.3.1"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/yazl": "^3.3.1",
     "electron": "^43.4.0",
     "electron-builder": "^26.15.3",
     "eslint": "^9",
@@ -35,24 +33,28 @@
   },
   "build": {
     "appId": "com.fetchly.desktop",
-    "productName": "Fetchly",
-    "asar": false,
+    "productName": "Pista",
+    "asar": true,
     "directories": {
       "output": "release"
     },
     "files": [
-      ".next/**/*",
-      "public/**/*",
       "electron/**/*",
-      "node_modules/**/*",
-      "bin/**/*",
       "package.json",
-      "next.config.ts",
-      "!node_modules/electron/**/*",
-      "!node_modules/electron-builder/**/*"
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-desktop",
+        "to": ".",
+        "filter": [
+          "server/**/*"
+        ]
+      }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "electron/assets/icon.png"
     },
     "nsis": {
       "oneClick": false,

@@ -3,9 +3,8 @@
 import type { DownloadMode } from "@/lib/platform/types";
 
 const MODES: { id: DownloadMode; label: string }[] = [
-  { id: "auto", label: "Auto" },
+  { id: "auto", label: "Video" },
   { id: "audio", label: "Audio" },
-  { id: "mute", label: "Mute" },
 ];
 
 export function ModeToggle({
@@ -27,7 +26,7 @@ export function ModeToggle({
             type="button"
             disabled={disabled}
             onClick={() => onChange(m.id)}
-            className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-all ${
+            className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-all ${
               active ? "bg-white text-black" : "text-white/50 hover:text-white/85"
             } disabled:opacity-50`}
           >

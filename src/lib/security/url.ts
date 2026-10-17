@@ -86,7 +86,7 @@ export async function validateAndDetectPlatform(rawUrl: unknown): Promise<Valida
     }
   } catch (err) {
     if (err instanceof AppError) throw err;
-    throw new AppError("INVALID_URL", "Couldn't resolve this link.");
+    throw new AppError("INVALID_URL", "No se pudo resolver este enlace.");
   }
 
   return { url, platform };

@@ -19,6 +19,20 @@ export function getYouTubeVideoId(url: URL): string | null {
   return candidate && VIDEO_ID_RE.test(candidate) ? candidate : null;
 }
 
+/** Like getYouTubeVideoId, for a stored link that may not be a YouTube one (or a valid URL at all). */
+export function youtubeVideoIdFromLink(link: string | null): string | null {
+  if (!link) return null;
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase();
+  const isYouTube = host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com");
+  return isYouTube ? getYouTubeVideoId(url) : null;
+}
+
 /**
  * "Mix"/radio lists (RD…) are generated on the fly and effectively endless,
  * so only their first stretch is listed.
@@ -44,7 +58,7 @@ export function normalizePlaylist(raw: RawYtDlpPlaylist): NormalizedPlaylist {
 
   for (const e of raw.entries ?? []) {
     if (!e?.id || !VIDEO_ID_RE.test(e.id) || seen.has(e.id)) continue;
-    const title = e.title?.trim() || "Untitled";
+    const title = e.title?.trim() || "Sin título";
     if (UNAVAILABLE_TITLE_RE.test(title)) continue;
     if (e.live_status === "is_live" || e.live_status === "is_upcoming") continue;
     seen.add(e.id);

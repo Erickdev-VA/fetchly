@@ -15,6 +15,8 @@
 
 # next.js
 /.next/
+/.next-desktop/
+/.next-build/
 /out/
 
 # production
@@ -51,3 +53,6 @@ next-env.d.ts
 
 # electron-builder output
 /release/
+
+# desktop server built by scripts/build-desktop.mjs
+/dist-desktop/

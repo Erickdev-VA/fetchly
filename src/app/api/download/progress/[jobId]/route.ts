@@ -14,7 +14,7 @@ export async function GET(_request: Request, context: { params: Promise<{ jobId:
       percent: Math.round(job.percent),
       converting: job.status === "processing" && job.converting,
       errorMessage: job.errorMessage ?? null,
-      fileName: job.fileName ?? null,
+      item: job.item ? { id: job.item.id, category: job.item.category, filePath: job.item.filePath } : null,
     });
   } catch (err) {
     return errorResponse(err);
