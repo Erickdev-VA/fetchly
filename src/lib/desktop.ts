@@ -1,4 +1,5 @@
 import type { Category } from "./library/types";
+import type { PlayerSnapshot } from "./player/types";
 
 /** What electron/preload.cjs exposes as `window.fetchly`. */
 interface FetchlyBridge {
@@ -7,6 +8,12 @@ interface FetchlyBridge {
   showItemInFolder(filePath: string): Promise<boolean>;
   /** True once the file is in the Recycle Bin or was already gone. */
   trashItem(filePath: string): Promise<boolean>;
+  player: {
+    /** Tells Electron what's playing (taskbar buttons, tray menu, mini player). */
+    publishState(snapshot: PlayerSnapshot): void;
+    /** Commands from the taskbar and the tray; returns the unsubscribe function. Validate before use. */
+    onCommand(listener: (command: unknown) => void): () => void;
+  };
 }
 
 declare global {

@@ -6,6 +6,9 @@ import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
 import { removeFromLibrary } from "@/lib/library/actions";
 import type { LibraryEntry } from "@/lib/library/types";
+import { toTrack } from "@/lib/player/types";
+import { usePlayer } from "../player/PlayerProvider";
+import { PlayerIcon } from "../player/PlayerIcon";
 import { PlatformBadge } from "../PlatformBadge";
 import { ErrorBanner } from "../ErrorBanner";
 import { PageHeader } from "../shell/PageHeader";
@@ -61,6 +64,8 @@ export function MusicLibrary() {
   const [confirming, setConfirming] = useState<LibraryEntry | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const bridge = desktop();
+  const player = usePlayer();
+  const currentId = player.current?.track.id ?? null;
 
   const visible = useMemo(() => {
     if (!items) return [];
@@ -73,8 +78,18 @@ export function MusicLibrary() {
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  const menuActions = (entry: LibraryEntry): MenuAction[] =>
-    bridge
+  /** Plays `entry` with the visible list (as filtered and sorted) as the queue. */
+  const playFromList = (entry: LibraryEntry) => {
+    const playable = visible.filter((e) => !e.missing);
+    const start = playable.indexOf(entry);
+    if (start >= 0) player.actions.playTracks(playable.map(toTrack), start);
+  };
+
+  const menuActions = (entry: LibraryEntry): MenuAction[] => [
+    { label: "Reproducir", disabled: entry.missing, onSelect: () => playFromList(entry) },
+    { label: "Reproducir a continuación", disabled: entry.missing, onSelect: () => player.actions.playNext([toTrack(entry)]) },
+    { label: "Añadir a la cola", disabled: entry.missing, onSelect: () => player.actions.addToQueue([toTrack(entry)]) },
+    ...(bridge
       ? [
           {
             label: "Mostrar en carpeta",
@@ -87,13 +102,16 @@ export function MusicLibrary() {
             onSelect: () => setConfirming(entry),
           },
         ]
-      : [];
+      : []),
+  ];
 
   const confirmRemove = async () => {
     const entry = confirming;
     setConfirming(null);
     if (!entry) return;
     try {
+      // Stop it first if it's playing, so Windows doesn't see the file as in use.
+      player.actions.forgetTrack(entry.id);
       await removeFromLibrary(entry);
       setActionError(null);
     } catch (err) {
@@ -164,7 +182,9 @@ export function MusicLibrary() {
                 <TrackRow
                   key={entry.id}
                   entry={entry}
-                  hasMenu={bridge !== null}
+                  isCurrent={entry.id === currentId}
+                  isPlaying={entry.id === currentId && player.playing}
+                  onPlay={() => playFromList(entry)}
                   onMenu={(x, y) => setMenu({ entry, x, y })}
                 />
               ))}
@@ -194,26 +214,50 @@ export function MusicLibrary() {
 
 function TrackRow({
   entry,
-  hasMenu,
+  isCurrent,
+  isPlaying,
+  onPlay,
   onMenu,
 }: {
   entry: LibraryEntry;
-  hasMenu: boolean;
+  isCurrent: boolean;
+  isPlaying: boolean;
+  onPlay: () => void;
   onMenu: (x: number, y: number) => void;
 }) {
   const duration = formatDuration(entry.durationSeconds);
   return (
     <li
+      onDoubleClick={(e) => {
+        if (entry.missing || (e.target as HTMLElement).closest("button")) return;
+        onPlay();
+      }}
       onContextMenu={(e) => {
-        if (!hasMenu) return;
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
       }}
-      className={`group flex items-center gap-3 px-3 py-2 transition hover:bg-white/[0.03] ${entry.missing ? "opacity-50" : ""}`}
+      className={`group flex select-none items-center gap-3 px-3 py-2 transition ${
+        isCurrent ? "bg-[var(--accent)]/[0.08]" : "hover:bg-white/[0.03]"
+      } ${entry.missing ? "opacity-50" : ""}`}
     >
-      <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="music" className="h-10 w-10 shrink-0 rounded-md" />
+      <div className="relative h-10 w-10 shrink-0">
+        <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="music" className="h-10 w-10 rounded-md" />
+        {!entry.missing && (
+          <button
+            type="button"
+            onClick={onPlay}
+            aria-label={`Reproducir ${entry.title}`}
+            title="Reproducir"
+            className={`absolute inset-0 flex items-center justify-center rounded-md bg-black/55 text-white outline-none transition focus-visible:opacity-100 group-hover:opacity-100 ${
+              isPlaying ? "opacity-100" : "opacity-0"
+            }`}
+          >
+            {isPlaying ? <PlayingBars /> : <PlayerIcon name="play" size={16} />}
+          </button>
+        )}
+      </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13.5px] text-white/90" title={entry.title}>
+        <p className={`truncate text-[13.5px] ${isCurrent ? "font-medium text-[var(--accent)]" : "text-white/90"}`} title={entry.title}>
           {entry.title}
         </p>
         <p className="truncate text-xs text-white/40">
@@ -223,26 +267,37 @@ function TrackRow({
       <div className="hidden w-24 shrink-0 @xl:block">{entry.platform && <PlatformBadge platform={entry.platform} />}</div>
       <span className="hidden w-28 shrink-0 text-xs text-white/40 @2xl:block">{dateFormat.format(entry.createdAt)}</span>
       <span className="w-12 shrink-0 text-right text-xs tabular-nums text-white/45">{duration ?? "—"}</span>
-      {hasMenu ? (
-        <button
-          type="button"
-          aria-label={`Opciones de ${entry.title}`}
-          aria-haspopup="menu"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            onMenu(rect.right, rect.bottom + 4);
-          }}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/45 opacity-0 outline-none transition hover:bg-white/[0.08] hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-            <circle cx="5" cy="12" r="1.8" />
-            <circle cx="12" cy="12" r="1.8" />
-            <circle cx="19" cy="12" r="1.8" />
-          </svg>
-        </button>
-      ) : (
-        <span className="w-8 shrink-0" />
-      )}
+      <button
+        type="button"
+        aria-label={`Opciones de ${entry.title}`}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          onMenu(rect.right, rect.bottom + 4);
+        }}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/45 opacity-0 outline-none transition hover:bg-white/[0.08] hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <circle cx="5" cy="12" r="1.8" />
+          <circle cx="12" cy="12" r="1.8" />
+          <circle cx="19" cy="12" r="1.8" />
+        </svg>
+      </button>
     </li>
+  );
+}
+
+/** The little bouncing bars on the song that's playing. */
+function PlayingBars() {
+  return (
+    <span className="flex h-3.5 items-end gap-[2px]" aria-hidden>
+      {[0, 0.2, 0.4].map((delay) => (
+        <span
+          key={delay}
+          className="w-[3px] rounded-sm bg-[var(--accent)]"
+          style={{ animation: `playingBar 0.9s ease-in-out ${delay}s infinite alternate` }}
+        />
+      ))}
+    </span>
   );
 }

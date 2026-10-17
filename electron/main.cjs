@@ -12,11 +12,21 @@ const path = require("node:path");
 const net = require("node:net");
 const fs = require("node:fs");
 const { execSync, execFile, spawn } = require("node:child_process");
+const { mediaIcons } = require("./media-icons.cjs");
 
 // "Fetchly" instead of the npm package name for %APPDATA%\Fetchly. Must run
 // before anything reads userData (the single-instance lock included).
 app.setName("Fetchly");
 app.setPath("userData", path.join(app.getPath("appData"), "Fetchly"));
+
+// Chromium pauses muted media in a window that's hidden or covered by other
+// windows ("to save power"). Fetchly's music lives in exactly such a window
+// while it sits in the tray, so muting it there would stop the song.
+app.commandLine.appendSwitch("disable-background-media-suspend");
+// Hooks navigator.mediaSession up to Windows: the media overlay next to the
+// volume flyout and the keyboard's play/pause/next/previous keys. Electron
+// leaves both off unless asked.
+app.commandLine.appendSwitch("enable-features", "MediaSessionService,HardwareMediaKeyHandling");
 
 const isDev = process.env.FETCHLY_DEV === "1" && !app.isPackaged;
 const PORT = Number(process.env.MEDIA_DOWNLOADER_PORT || (isDev ? 47824 : 47823));
@@ -37,7 +47,10 @@ const statePath = path.join(dataDir, "desktop-state.json");
 let mainWindow = null;
 let tray = null;
 let serverProcess = null;
+let serverReady = false;
 let quitting = false;
+/** The last state the page reported (see PlayerSnapshot in src/lib/player/types.ts). */
+let playerState = null;
 
 function readState() {
   try {
@@ -165,7 +178,14 @@ function killStrayBinaries() {
 }
 
 function showMainWindow() {
-  if (!mainWindow) return;
+  if (!mainWindow) {
+    // The page can close its own window (window.close() bypasses the "close"
+    // event that hides it), so build a fresh one rather than do nothing.
+    if (quitting) return;
+    createWindow();
+    if (serverReady) mainWindow.loadURL(APP_ORIGIN);
+    return;
+  }
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -192,8 +212,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      // The window keeps polling downloads (and, later, playing music) while
-      // hidden in the tray; don't let Chromium throttle it.
+      // The window keeps playing music and polling downloads while hidden
+      // in the tray; don't let Chromium throttle it.
       backgroundThrottling: false,
     },
   });
@@ -215,7 +235,12 @@ function createWindow() {
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
+    // Its music stopped with it.
+    playerState = null;
+    updateTrayMenu();
   });
+  // Windows drops the thumbnail buttons whenever the window is hidden.
+  mainWindow.on("show", updateThumbar);
 
   // Links to other sites open in the real browser, not inside the app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -233,16 +258,86 @@ function createWindow() {
 
 function createTray() {
   tray = new Tray(path.join(__dirname, "assets", "tray.png"));
-  tray.setToolTip("Fetchly");
+  updateTrayMenu();
+  tray.on("click", showMainWindow);
+}
+
+// --- player: taskbar thumbnail buttons and tray controls --------------------
+// The music plays in the main window's page. These only send it commands
+// and show what it last reported.
+
+function sendPlayerCommand(type) {
+  mainWindow?.webContents.send("player:command", { type });
+}
+
+/** Keeps only the fields the main process uses, with the right types. */
+function readSnapshot(value) {
+  if (typeof value !== "object" || value === null) return null;
+  const track = value.track;
+  return {
+    track:
+      typeof track === "object" && track !== null && typeof track.title === "string"
+        ? { title: track.title.slice(0, 200), artist: typeof track.artist === "string" ? track.artist.slice(0, 200) : null }
+        : null,
+    playing: value.playing === true,
+    hasPrevious: value.hasPrevious === true,
+    hasNext: value.hasNext === true,
+  };
+}
+
+function updateThumbar() {
+  if (!mainWindow || process.platform !== "win32") return;
+  if (!playerState?.track) {
+    mainWindow.setThumbarButtons([]);
+    return;
+  }
+  const icons = mediaIcons();
+  const flags = (enabled) => (enabled ? ["enabled"] : ["disabled"]);
+  mainWindow.setThumbarButtons([
+    { tooltip: "Anterior", icon: icons.previous, flags: flags(playerState.hasPrevious), click: () => sendPlayerCommand("previous") },
+    {
+      tooltip: playerState.playing ? "Pausar" : "Reproducir",
+      icon: playerState.playing ? icons.pause : icons.play,
+      click: () => sendPlayerCommand("toggle"),
+    },
+    { tooltip: "Siguiente", icon: icons.next, flags: flags(playerState.hasNext), click: () => sendPlayerCommand("next") },
+  ]);
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const track = playerState?.track ?? null;
+  // "&" marks a keyboard shortcut in Windows menus; "&&" shows a real one.
+  const menuText = (text) => text.replace(/&/g, "&&");
+  const nowPlaying = track ? `${track.title}${track.artist ? ` — ${track.artist}` : ""}` : null;
+  tray.setToolTip(nowPlaying ? `Fetchly · ${nowPlaying}`.slice(0, 127) : "Fetchly");
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      ...(nowPlaying ? [{ label: menuText(nowPlaying.slice(0, 60)), enabled: false }] : []),
+      {
+        label: playerState?.playing ? "Pausar" : "Reproducir",
+        enabled: Boolean(track),
+        click: () => sendPlayerCommand("toggle"),
+      },
+      { label: "Siguiente", enabled: Boolean(track && playerState.hasNext), click: () => sendPlayerCommand("next") },
+      { label: "Anterior", enabled: Boolean(track && playerState.hasPrevious), click: () => sendPlayerCommand("previous") },
+      { type: "separator" },
       { label: "Mostrar Fetchly", click: showMainWindow },
       { type: "separator" },
       { label: "Salir", click: quitApp },
     ]),
   );
-  tray.on("click", showMainWindow);
 }
+
+ipcMain.on("player:state", (event, value) => {
+  if (!fromApp(event) || event.sender !== mainWindow?.webContents) return;
+  const next = readSnapshot(value);
+  // Only rebuild the menu and buttons when something they show changed.
+  if (JSON.stringify(next) === JSON.stringify(playerState)) return;
+  playerState = next;
+  updateThumbar();
+  updateTrayMenu();
+});
 
 // --- IPC: the functions preload.cjs exposes to the page -------------------
 
@@ -295,11 +390,12 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     // Start the server first so it boots while the window is being created.
-    const serverReady = startServer();
+    const serverStarting = startServer();
     createWindow();
     createTray();
     try {
-      await serverReady;
+      await serverStarting;
+      serverReady = true;
       if (mainWindow) mainWindow.loadURL(APP_ORIGIN);
     } catch (err) {
       if (quitting) return;

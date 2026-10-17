@@ -11,4 +11,14 @@ contextBridge.exposeInMainWorld("fetchly", {
   showItemInFolder: (filePath) => ipcRenderer.invoke("library:show-item", filePath),
   /** Sends a library file to the Recycle Bin. */
   trashItem: (filePath) => ipcRenderer.invoke("library:trash-item", filePath),
+  player: {
+    publishState: (snapshot) => ipcRenderer.send("player:state", snapshot),
+    /** Commands from the taskbar thumbnail and the tray. Returns the unsubscribe function. */
+    onCommand: (listener) => {
+      // The page only ever sees the command, never the IPC event.
+      const wrapped = (_event, command) => listener(command);
+      ipcRenderer.on("player:command", wrapped);
+      return () => ipcRenderer.removeListener("player:command", wrapped);
+    },
+  },
 });

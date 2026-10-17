@@ -1,20 +1,26 @@
 import { Sidebar } from "@/components/shell/Sidebar";
-import { PlayerBar } from "@/components/shell/PlayerBar";
+import { PlayerProvider } from "@/components/player/PlayerProvider";
+import { PlayerBar } from "@/components/player/PlayerBar";
+import { QueuePanel } from "@/components/player/QueuePanel";
 
 /**
  * The main window: menu on the left, the current section on the right and
  * the playback bar along the bottom. This layout stays mounted while moving
- * between sections, which is what will keep the music playing across them.
- * The floating mini player (/mini) lives outside this group, without it.
+ * between sections, and the player (with its <audio>) lives in it, so the
+ * music keeps playing across pages. The floating mini player (/mini) lives
+ * outside this group, without it.
  */
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1">
-        <Sidebar />
-        <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+    <PlayerProvider>
+      <div className="flex h-full flex-col">
+        <div className="relative flex min-h-0 flex-1">
+          <Sidebar />
+          <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+          <QueuePanel />
+        </div>
+        <PlayerBar />
       </div>
-      <PlayerBar />
-    </div>
+    </PlayerProvider>
   );
 }
