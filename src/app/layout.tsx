@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Fetchly — Paste a link, get your media",
-  description: "Paste a YouTube, TikTok, or Instagram link and download it in seconds.",
+  description: "Paste a YouTube, TikTok, Instagram, or X (Twitter) link and download it in seconds.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -4,6 +4,7 @@ const PLATFORM_META: Record<Platform, { label: string; dotClass: string }> = {
   youtube: { label: "YouTube", dotClass: "bg-red-500" },
   tiktok: { label: "TikTok", dotClass: "bg-cyan-400" },
   instagram: { label: "Instagram", dotClass: "bg-fuchsia-500" },
+  twitter: { label: "X", dotClass: "bg-white" },
 };
 
 export function PlatformBadge({ platform }: { platform: Platform }) {

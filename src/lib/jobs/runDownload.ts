@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { YTDLP_PATH, FFMPEG_PATH } from "../ytdlp/binary";
 import { getCookiesArgs } from "../ytdlp/cookies";
 import { getJsRuntimeArgs, getJsRuntimeEnv } from "../ytdlp/jsRuntime";
+import { getExtractorArgs } from "../ytdlp/extractors";
 import { makeShareable, stripTrack } from "../ytdlp/postprocess";
 import { killProcessTree } from "../ytdlp/process";
 import { waitForYtDlpUpdate } from "../ytdlp/updater";
@@ -165,6 +166,7 @@ export async function runDownload(opts: RunDownloadOptions): Promise<string> {
     "15",
     ...getJsRuntimeArgs(),
     ...getCookiesArgs(),
+    ...getExtractorArgs(),
   ];
   if (plan.needsMerge) args.push("--merge-output-format", "mp4");
   args.push("--", opts.url);

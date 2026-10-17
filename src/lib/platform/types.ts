@@ -1,4 +1,4 @@
-export type Platform = "youtube" | "tiktok" | "instagram";
+export type Platform = "youtube" | "tiktok" | "instagram" | "twitter";
 
 export type DownloadMode = "auto" | "audio" | "mute";
 

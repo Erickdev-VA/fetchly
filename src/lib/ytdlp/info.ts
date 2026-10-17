@@ -4,6 +4,7 @@ import { logger } from "../logger";
 import { YTDLP_PATH, FFMPEG_PATH } from "./binary";
 import { getCookiesArgs } from "./cookies";
 import { getJsRuntimeArgs, getJsRuntimeEnv } from "./jsRuntime";
+import { getExtractorArgs } from "./extractors";
 import { killProcessTree } from "./process";
 import { waitForYtDlpUpdate } from "./updater";
 import type { RawYtDlpInfo, RawYtDlpPlaylist } from "./rawTypes";
@@ -28,6 +29,7 @@ async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
         FFMPEG_PATH,
         ...getJsRuntimeArgs(),
         ...getCookiesArgs(),
+        ...getExtractorArgs(),
         ...args,
       ],
       {
@@ -53,7 +55,10 @@ async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
         const text = stderr || error.message || "";
         logger.error("yt-dlp metadata fetch failed", { stderr: text.slice(-2000) });
 
-        if (/private|login required|rate-?limit/i.test(text)) {
+        if (/no video could be found|no suitable extractor|unsupported url/i.test(text)) {
+          // e.g. a tweet that's only text/images, or one linking elsewhere.
+          reject(new AppError("CONTENT_UNAVAILABLE", "This post doesn't contain a video that can be downloaded."));
+        } else if (/private|login required|rate-?limit/i.test(text)) {
           reject(new AppError("CONTENT_PRIVATE"));
         } else if (/unavailable|not available|removed|404|does not exist/i.test(text)) {
           reject(new AppError("CONTENT_UNAVAILABLE"));

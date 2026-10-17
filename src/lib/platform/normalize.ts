@@ -15,7 +15,11 @@ export interface NormalizedMedia {
 }
 
 const hasVideo = (f: RawYtDlpFormat) => Boolean(f.vcodec) && f.vcodec !== "none";
-const hasAudio = (f: RawYtDlpFormat) => Boolean(f.acodec) && f.acodec !== "none";
+// Some platforms (X/Twitter's HLS audio renditions) don't report an audio
+// codec at all; a format explicitly marked video-less is still audio-only,
+// which is the same inference yt-dlp itself makes for `bestaudio`.
+const hasAudio = (f: RawYtDlpFormat) =>
+  f.acodec ? f.acodec !== "none" : f.vcodec === "none";
 const bitrate = (f: RawYtDlpFormat) => f.tbr ?? 0;
 const size = (f: RawYtDlpFormat) => f.filesize ?? f.filesize_approx ?? null;
 

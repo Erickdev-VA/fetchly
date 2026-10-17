@@ -102,7 +102,9 @@ export async function makeShareable(
 
   if (keep === "audio") {
     if (!hasAudio) throw new Error("no audio stream to keep");
-    if (audioOk && (ext === ".m4a" || ext === ".mp4") && !hasVideo) return inputPath;
+    // An audio-only .mp4 (what X/Twitter serves) still gets a lossless remux to
+    // .m4a so phones file it as audio rather than as a broken video.
+    if (audioOk && ext === ".m4a" && !hasVideo) return inputPath;
     outPath = path.join(tempDir, "shareable.m4a");
     args = ["-vn", "-map", "0:a:0", ...(audioOk ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])];
   } else {
