@@ -9,9 +9,13 @@ import { waitForYtDlpUpdate } from "./updater";
 import type { RawYtDlpInfo, RawYtDlpPlaylist } from "./rawTypes";
 
 const INFO_TIMEOUT_MS = 25_000;
-const PLAYLIST_TIMEOUT_MS = 60_000;
-const MAX_BUFFER_BYTES = 15 * 1024 * 1024;
-export const MAX_PLAYLIST_ENTRIES = 300;
+// yt-dlp pages through a playlist 100 videos at a time, so a 1000-video
+// list takes about ten round trips to YouTube.
+const PLAYLIST_TIMEOUT_MS = 180_000;
+// A flat entry (title, author, thumbnail list) is a few KB of JSON.
+const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+/** How many videos of a playlist are listed, and so how many one batch can download. */
+export const MAX_PLAYLIST_ENTRIES = 1000;
 
 async function runYtDlpJson<T>(args: string[], timeoutMs: number): Promise<T> {
   await waitForYtDlpUpdate();

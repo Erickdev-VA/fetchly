@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
+import { useDragReorder } from "@/hooks/useDragReorder";
 import { formatDuration } from "@/lib/format";
 import type { QueueEntry } from "@/lib/player/types";
+import { DropLine, GripDots } from "../library/ListBits";
 import { LibraryThumb } from "../library/LibraryThumb";
 import { PlayerIcon } from "./PlayerIcon";
 import { usePlayer } from "./PlayerProvider";
@@ -12,28 +14,42 @@ function QueueRow({
   current,
   onPlay,
   onRemove,
+  drag,
 }: {
   entry: QueueEntry;
   current?: boolean;
   onPlay?: () => void;
   onRemove: () => void;
+  /** For the rows in "A continuación", which can be dragged into another order. */
+  drag?: { props: React.LiHTMLAttributes<HTMLLIElement> & { draggable: boolean }; marker: "before" | "after" | null; dragging: boolean };
 }) {
   const { track } = entry;
   return (
-    <li className="group flex items-center gap-2 rounded-lg pr-1 hover:bg-white/[0.04]">
+    <li
+      {...drag?.props}
+      className={`group relative flex items-center gap-1 rounded-lg pr-1 hover:bg-white/[0.04] ${drag?.dragging ? "opacity-40" : ""}`}
+    >
+      {drag && (
+        <>
+          <DropLine at={drag.marker} />
+          <span className="flex w-3 shrink-0 cursor-grab justify-center text-white/45 opacity-0 transition active:cursor-grabbing group-hover:opacity-100" title="Arrastra para cambiar el orden">
+            <GripDots />
+          </span>
+        </>
+      )}
       <button
         type="button"
         onClick={onPlay}
         disabled={!onPlay}
         title={onPlay ? `Reproducir ${track.title}` : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
+        className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-1.5 pr-2 text-left ${drag ? "pl-1" : "pl-2"} outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60`}
       >
-        <LibraryThumb id={track.id} hasThumbnail={track.hasThumbnail} fallbackIcon="music" className="h-9 w-9 shrink-0 rounded-md" />
+        <LibraryThumb id={track.id} hasThumbnail={track.hasThumbnail} fallbackIcon={track.kind === "video" ? "video" : "music"} className="h-9 w-9 shrink-0 rounded-md" />
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-[13px] ${current ? "font-medium text-[var(--accent)]" : "text-white/85"}`}>
             {track.title}
           </span>
-          <span className="block truncate text-[11px] text-white/40">{track.artist ?? "—"}</span>
+          <span className="block truncate text-[11px] text-white/40">{track.artist ?? (track.kind === "video" ? "Video" : "—")}</span>
         </span>
         <span className="shrink-0 text-[11px] tabular-nums text-white/35">{formatDuration(track.durationSeconds) ?? ""}</span>
       </button>
@@ -53,6 +69,7 @@ function QueueRow({
 /** The queue, sliding over the right side of the page; opened with ☰ in the bar. */
 export function QueuePanel() {
   const { queue, current, queueOpen, setQueueOpen, actions } = usePlayer();
+  const drag = useDragReorder({ onMove: ([uid], spot) => actions.moveInQueue([uid], spot.target, spot.after) });
 
   useEffect(() => {
     if (!queueOpen) return;
@@ -94,6 +111,9 @@ export function QueuePanel() {
             </ul>
             <div className="flex items-center justify-between px-2 pb-1 pt-4">
               <h3 className="text-[11px] font-semibold uppercase tracking-wide text-white/35">A continuación</h3>
+              {upcoming.length > 1 && (
+                <span className="ml-2 mr-auto text-[10px] text-white/30">Arrastra para cambiar el orden</span>
+              )}
               {upcoming.length > 0 && (
                 <button type="button" onClick={actions.clearUpcoming} className="text-[11px] font-medium text-white/45 transition hover:text-white">
                   Vaciar
@@ -110,6 +130,7 @@ export function QueuePanel() {
                     entry={entry}
                     onPlay={() => actions.jumpTo(entry.uid)}
                     onRemove={() => actions.removeFromQueue(entry.uid)}
+                    drag={{ props: drag.rowProps(entry.uid), marker: drag.marker(entry.uid), dragging: drag.isDragging(entry.uid) }}
                   />
                 ))}
               </ul>

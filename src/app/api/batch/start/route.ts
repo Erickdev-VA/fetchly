@@ -4,9 +4,11 @@ import { startBatchJob } from "@/lib/jobs/batchJobs";
 import { AppError } from "@/lib/errors";
 import { errorResponse } from "@/lib/http";
 import { PLAYLIST_HEIGHTS, type DownloadMode } from "@/lib/platform/types";
+import { MAX_PLAYLIST_ENTRIES } from "@/lib/ytdlp/info";
 
 const VALID_MODES: DownloadMode[] = ["auto", "audio", "mute"];
-const MAX_BATCH_ITEMS = 100;
+// Items wait in the batch's own queue, so a whole listed playlist can go at once.
+const MAX_BATCH_ITEMS = MAX_PLAYLIST_ENTRIES;
 
 interface StartBody {
   analysisId?: unknown;

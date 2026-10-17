@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { MiniPlayer } from "@/components/mini/MiniPlayer";
 
 export const metadata: Metadata = {
-  title: "Mini reproductor · Fetchly",
+  title: "Mini reproductor · Pista",
 };
 
 /**

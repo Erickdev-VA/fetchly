@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { libraryMediaUrl, libraryThumbnailUrl } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
 import { prefsStore, type PlayerPrefs } from "@/lib/player/prefs";
@@ -10,34 +10,56 @@ import {
   currentEntry,
   insertNext,
   makeEntries,
+  moveUpcoming,
   newQueue,
   removeWhere,
   setShuffle,
   type QueueState,
 } from "@/lib/player/queue";
 import { isPlayerCommand, type PlayerSnapshot, type QueueEntry, type Track } from "@/lib/player/types";
+import { forgetPosition, savePosition, savedPosition } from "@/lib/library/videoPositions";
+import { VideoStage } from "./VideoStage";
 
 /** Going back within this many seconds jumps to the previous song; later it restarts the current one. */
 const RESTART_THRESHOLD_S = 3;
 const ERROR_VISIBLE_MS = 5000;
+// Videos pick up where they were left: only past this point, and not in the last stretch.
+const RESUME_MIN_S = 5;
+const RESUME_END_MARGIN_S = 10;
+const VIDEO_SAVE_EVERY_MS = 5000;
+const RESUME_NOTICE_MS = 8000;
+/** Over a video, the controls fade out after this long without the mouse moving. */
+const IDLE_MS = 3000;
+
+/** Remembers where a video was left (or forgets it once it was watched to the end). */
+function rememberVideoPosition(entry: QueueEntry | null, el: HTMLMediaElement | null): void {
+  if (!entry || entry.track.kind !== "video" || !el || el.currentTime <= 0) return;
+  const end = Number.isFinite(el.duration) ? el.duration : (entry.track.durationSeconds ?? Infinity);
+  if (end - el.currentTime < RESUME_END_MARGIN_S) forgetPosition(entry.track.id);
+  else savePosition(entry.track.id, el.currentTime);
+}
 
 export interface PlayerActions {
   /** Replaces the queue with `tracks` and plays from `startIndex`. */
   playTracks(tracks: Track[], startIndex: number): void;
+  /** Like playTracks, for videos: also opens the full-window video view. */
+  playVideos(tracks: Track[], startIndex: number): void;
   /** Turns shuffle on and plays `tracks` from a random one. */
   shuffleTracks(tracks: Track[]): void;
   playNext(tracks: Track[]): void;
   addToQueue(tracks: Track[]): void;
   toggle(): void;
-  /** Pauses the music if it is playing (a video is about to start). */
+  /** Pauses playback if it is playing. */
   pause(): void;
   next(): void;
-  /** The <audio> element finished a song: like next(), except "repeat one" replays it. */
+  /** The media element finished a song: like next(), except "repeat one" replays it. */
   ended(): void;
   previous(): void;
   seek(seconds: number): void;
   jumpTo(uid: string): void;
   removeFromQueue(uid: string): void;
+  /** Drag and drop in "A continuación": puts `uids` right before (or after) `targetUid`. */
+  moveInQueue(uids: string[], targetUid: string, after: boolean): void;
   clearUpcoming(): void;
   /** Drops a song from the queue everywhere, stopping it if it's playing (used before deleting it). */
   forgetTrack(trackId: string): void;
@@ -57,6 +79,15 @@ interface PlayerState extends PlayerPrefs {
   error: string | null;
   queueOpen: boolean;
   setQueueOpen(open: boolean): void;
+  /** The current video fills the window (only ever true while a video is the current track). */
+  videoOpen: boolean;
+  openVideo(): void;
+  closeVideo(): void;
+  /** The window is in full screen, showing the video and the bar. */
+  fullscreen: boolean;
+  toggleFullscreen(): void;
+  /** Over a video, the mouse hasn't moved for a while: controls fade out. */
+  idle: boolean;
   actions: PlayerActions;
 }
 
@@ -75,13 +106,16 @@ export function usePlayerPosition(): number {
 }
 
 /**
- * The music engine. It owns the app's only <audio> element and lives in the
+ * The playback engine, for songs and videos alike. It owns the app's only
+ * media element (a <video>, which plays songs just as well) and lives in the
  * (app) layout, which stays mounted across sections, so changing pages or
- * hiding the window to the tray never interrupts playback. The taskbar,
- * tray and mini player only send commands here and mirror its state.
+ * hiding the window to the tray never interrupts playback. A video's picture
+ * shows in VideoStage, over the whole window; the playback bar controls both.
+ * The taskbar, tray and mini player only send commands here and mirror its
+ * state.
  */
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const mediaRef = useRef<HTMLVideoElement>(null);
   const [queue, setQueue] = useState<QueueState>(EMPTY_QUEUE);
   const queueRef = useRef(queue);
   const [playing, setPlaying] = useState(false);
@@ -92,9 +126,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const prefs = useSyncExternalStore(prefsStore.subscribe, prefsStore.getSnapshot, prefsStore.getServerSnapshot);
   const failuresInARow = useRef(0);
   const errorTimer = useRef<number | null>(null);
+  const [videoOpen, setVideoOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [idle, setIdle] = useState(false);
+  /** "Continuando desde 3:12" for the video in this queue slot. */
+  const [resumeNotice, setResumeNotice] = useState<{ uid: string; from: number } | null>(null);
+  /** The slot whose file is in the media element now. */
+  const loadedRef = useRef<QueueEntry | null>(null);
+  /** Where to jump once the video being loaded knows its length. */
+  const resumeRef = useRef<number | null>(null);
+  const lastVideoSave = useRef(0);
 
   const actions = useMemo<PlayerActions>(() => {
-    const audio = () => audioRef.current;
+    const media = () => mediaRef.current;
 
     const commit = (next: QueueState) => {
       queueRef.current = next;
@@ -102,8 +146,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
 
     const load = (entry: QueueEntry | null, autoplay: boolean) => {
-      const el = audio();
+      const el = media();
       if (!el) return;
+      // Leaving a video halfway: remember where, to pick it up from there next time.
+      if (loadedRef.current && loadedRef.current !== entry) rememberVideoPosition(loadedRef.current, el);
+      loadedRef.current = entry;
+      resumeRef.current = null;
       setPosition(0);
       if (!entry) {
         el.pause();
@@ -113,6 +161,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setDuration(entry.track.durationSeconds);
+      if (entry.track.kind === "video") resumeRef.current = savedPosition(entry.track.id);
       el.src = libraryMediaUrl(entry.track.id);
       // A rejected play() here only means a newer src replaced this one.
       if (autoplay) el.play().catch(() => {});
@@ -127,7 +176,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     /** After removing slots: keep playing whatever took the current song's place. */
     const commitRemoval = (next: QueueState) => {
       const before = currentEntry(queueRef.current);
-      const wasPlaying = !(audio()?.paused ?? true);
+      const wasPlaying = !(media()?.paused ?? true);
       commit(next);
       const after = currentEntry(next);
       if (after !== before) load(after, wasPlaying);
@@ -136,7 +185,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const advance = (auto: boolean) => {
       const q = queueRef.current;
       const { repeat } = prefsStore.getSnapshot();
-      const el = audio();
+      const el = media();
       if (auto && repeat === "one" && el) {
         el.currentTime = 0;
         el.play().catch(() => {});
@@ -150,11 +199,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    const startQueue = (tracks: Track[], startIndex: number) => {
+      const next = newQueue(makeEntries(tracks), startIndex, prefsStore.getSnapshot().shuffle);
+      commit(next);
+      load(currentEntry(next), true);
+    };
+
     return {
-      playTracks(tracks, startIndex) {
-        const next = newQueue(makeEntries(tracks), startIndex, prefsStore.getSnapshot().shuffle);
-        commit(next);
-        load(currentEntry(next), true);
+      playTracks:(tracks, startIndex) => startQueue(tracks, startIndex),
+      playVideos(tracks, startIndex) {
+        startQueue(tracks, startIndex);
+        setIdle(false);
+        setVideoOpen(true);
       },
       shuffleTracks(tracks) {
         if (tracks.length === 0) return;
@@ -177,7 +233,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (!hadSong) load(currentEntry(next), false);
       },
       toggle() {
-        const el = audio();
+        const el = media();
         const q = queueRef.current;
         if (!el) return;
         if (!currentEntry(q)) {
@@ -188,12 +244,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         else el.pause();
       },
       pause() {
-        audio()?.pause();
+        media()?.pause();
       },
       next: () => advance(false),
       ended: () => advance(true),
       previous() {
-        const el = audio();
+        const el = media();
         const q = queueRef.current;
         if (!el || !currentEntry(q)) return;
         if (el.currentTime > RESTART_THRESHOLD_S) {
@@ -207,7 +263,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
       },
       seek(seconds) {
-        const el = audio();
+        const el = media();
         if (!el || !currentEntry(queueRef.current)) return;
         const end = Number.isFinite(el.duration) ? el.duration : seconds;
         el.currentTime = Math.min(Math.max(0, seconds), end);
@@ -219,6 +275,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       },
       removeFromQueue(uid) {
         commitRemoval(removeWhere(queueRef.current, (e) => e.uid === uid));
+      },
+      moveInQueue(uids, targetUid, after) {
+        const next = moveUpcoming(queueRef.current, uids, targetUid, after);
+        if (next !== queueRef.current) commit(next);
       },
       clearUpcoming() {
         const q = queueRef.current;
@@ -253,10 +313,75 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const hasPrevious = current !== null;
   const hasNext = queue.index + 1 < queue.order.length || (prefs.repeat === "all" && queue.order.length > 1);
 
-  // --- the <audio> element ---------------------------------------------------
+  // --- the video view: full window, full screen, idle controls ----------------
+
+  // Moving on to a song closes the view by itself: it only ever shows a video.
+  const stageShown = videoOpen && current?.track.kind === "video";
+
+  const openVideo = useCallback(() => {
+    setIdle(false);
+    setVideoOpen(true);
+  }, []);
+  const closeVideo = useCallback(() => setVideoOpen(false), []);
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    // The whole page, so the playback bar stays with the video.
+    else void document.documentElement.requestFullscreen().catch(() => {});
+  }, []);
 
   useEffect(() => {
-    const el = audioRef.current;
+    const onChange = () => setFullscreen(document.fullscreenElement !== null);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // Full screen is for the video: leaving the view leaves it too.
+  useEffect(() => {
+    if (!stageShown && document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+  }, [stageShown]);
+
+  // Over the video, the controls fade out when the mouse rests, except over the bar.
+  useEffect(() => {
+    if (!stageShown) return;
+    let timer = 0;
+    const wake = (event: Event) => {
+      setIdle(false);
+      window.clearTimeout(timer);
+      const overBar = event.target instanceof Element && event.target.closest("footer") !== null;
+      if (!overBar) timer = window.setTimeout(() => setIdle(true), IDLE_MS);
+    };
+    const keys = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target?.closest("input, textarea, button, [role=slider], dialog") !== null && target !== null;
+      if (event.key === "Escape" && !document.fullscreenElement) setVideoOpen(false);
+      else if (event.key === " " && !typing) {
+        event.preventDefault();
+        actionsRef.current.toggle();
+      } else if (event.key.toLowerCase() === "f" && !typing) toggleFullscreen();
+    };
+    timer = window.setTimeout(() => setIdle(true), IDLE_MS);
+    window.addEventListener("mousemove", wake);
+    window.addEventListener("pointerdown", wake);
+    window.addEventListener("keydown", keys);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousemove", wake);
+      window.removeEventListener("pointerdown", wake);
+      window.removeEventListener("keydown", keys);
+    };
+  }, [stageShown, toggleFullscreen]);
+
+  // "Continuando desde…" goes away by itself after a few seconds.
+  useEffect(() => {
+    if (!resumeNotice) return;
+    const timer = window.setTimeout(() => setResumeNotice(null), RESUME_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [resumeNotice]);
+
+  // --- the media element -------------------------------------------------------
+
+  useEffect(() => {
+    const el = mediaRef.current;
     if (!el) return;
     // Squared, so the slider feels even: ears hear loudness, not amplitude.
     el.volume = prefs.volume * prefs.volume;
@@ -269,7 +394,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     errorTimer.current = window.setTimeout(() => setError(null), ERROR_VISIBLE_MS);
   };
 
-  const onAudioError = () => {
+  const onMediaError = () => {
     const q = queueRef.current;
     const entry = currentEntry(q);
     if (!entry) return;
@@ -286,8 +411,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const session = navigator.mediaSession;
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
       // Separate play/pause, so a "pause" while already paused never resumes.
-      ["play", () => audioRef.current?.paused && actionsRef.current.toggle()],
-      ["pause", () => audioRef.current?.paused === false && actionsRef.current.toggle()],
+      ["play", () => mediaRef.current?.paused && actionsRef.current.toggle()],
+      ["pause", () => mediaRef.current?.paused === false && actionsRef.current.toggle()],
       ["previoustrack", () => actionsRef.current.previous()],
       ["nexttrack", () => actionsRef.current.next()],
       ["seekto", (details) => details.seekTime !== undefined && actionsRef.current.seek(details.seekTime)],
@@ -317,7 +442,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       ? new MediaMetadata({
           title: track.title,
           artist: track.artist ?? "",
-          album: "Fetchly",
+          album: "Pista",
           artwork: track.hasThumbnail
             ? [{ src: new URL(libraryThumbnailUrl(track.id), window.location.origin).href }]
             : [],
@@ -331,7 +456,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [track, playing]);
 
   const updatePositionState = () => {
-    const el = audioRef.current;
+    const el = mediaRef.current;
     if (!el || !("mediaSession" in navigator) || !Number.isFinite(el.duration)) return;
     try {
       navigator.mediaSession.setPositionState({
@@ -358,7 +483,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const key = JSON.stringify(base);
     if (!force && key === publishedKeyRef.current) return;
     publishedKeyRef.current = key;
-    player.publishState({ ...base, position: audioRef.current?.currentTime ?? 0, positionAt: Date.now() });
+    player.publishState({ ...base, position: mediaRef.current?.currentTime ?? 0, positionAt: Date.now() });
   };
 
   useEffect(() => {
@@ -387,6 +512,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       else if (command.type === "previous") a.previous();
       else if (command.type === "seek") a.seek(command.seconds);
       else if (command.type === "volume") a.setVolume(command.volume);
+      else if (command.type === "toggleShuffle") a.toggleShuffle();
       else a.toggleMute();
     });
   }, []);
@@ -402,38 +528,106 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       error,
       queueOpen,
       setQueueOpen,
+      videoOpen: stageShown,
+      openVideo,
+      closeVideo,
+      fullscreen,
+      toggleFullscreen,
+      idle: stageShown && idle,
       actions,
       ...prefs,
     }),
-    [queue, current, playing, duration, hasPrevious, hasNext, error, queueOpen, actions, prefs],
+    [
+      queue,
+      current,
+      playing,
+      duration,
+      hasPrevious,
+      hasNext,
+      error,
+      queueOpen,
+      stageShown,
+      openVideo,
+      closeVideo,
+      fullscreen,
+      toggleFullscreen,
+      idle,
+      actions,
+      prefs,
+    ],
   );
+
+  const notice = resumeNotice && resumeNotice.uid === current?.uid ? resumeNotice.from : null;
 
   return (
     <PlayerContext.Provider value={value}>
       <PositionContext.Provider value={position}>
         {children}
-        <audio
-          ref={audioRef}
-          preload="auto"
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onPlaying={() => {
-            failuresInARow.current = 0;
-            updatePositionState();
+        {/* Always mounted, in the same place: moving or remounting it would cut the sound. */}
+        <VideoStage
+          shown={stageShown}
+          fullscreen={fullscreen}
+          idle={stageShown && idle}
+          playing={playing}
+          track={current?.track ?? null}
+          resumedFrom={notice}
+          onClose={closeVideo}
+          onToggle={actions.toggle}
+          onToggleFullscreen={toggleFullscreen}
+          onRestart={() => {
+            actions.seek(0);
+            setResumeNotice(null);
           }}
-          onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
-          onDurationChange={(e) => {
-            if (Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
-            updatePositionState();
-          }}
-          onSeeked={() => {
-            updatePositionState();
-            publish(true);
-          }}
-          onEnded={() => actionsRef.current.ended()}
-          onError={onAudioError}
-          hidden
-        />
+          onDismissNotice={() => setResumeNotice(null)}
+        >
+          <video
+            ref={mediaRef}
+            preload="auto"
+            playsInline
+            onPlay={() => setPlaying(true)}
+            onPause={(e) => {
+              setPlaying(false);
+              rememberVideoPosition(loadedRef.current, e.currentTarget);
+            }}
+            onPlaying={() => {
+              failuresInARow.current = 0;
+              updatePositionState();
+            }}
+            onLoadedMetadata={(e) => {
+              // A video left halfway picks up there, with a note offering to start over.
+              const from = resumeRef.current;
+              resumeRef.current = null;
+              const el = e.currentTarget;
+              const entry = loadedRef.current;
+              if (from === null || !entry || !Number.isFinite(el.duration)) return;
+              if (from < RESUME_MIN_S || from > el.duration - RESUME_END_MARGIN_S) return;
+              el.currentTime = from;
+              setResumeNotice({ uid: entry.uid, from });
+            }}
+            onTimeUpdate={(e) => {
+              setPosition(e.currentTarget.currentTime);
+              if (Date.now() - lastVideoSave.current >= VIDEO_SAVE_EVERY_MS) {
+                lastVideoSave.current = Date.now();
+                rememberVideoPosition(loadedRef.current, e.currentTarget);
+              }
+            }}
+            onDurationChange={(e) => {
+              if (Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
+              updatePositionState();
+            }}
+            onSeeked={() => {
+              updatePositionState();
+              publish(true);
+            }}
+            onEnded={() => {
+              const entry = loadedRef.current;
+              if (entry?.track.kind === "video") forgetPosition(entry.track.id);
+              actionsRef.current.ended();
+            }}
+            onError={onMediaError}
+            className="h-full w-full bg-black object-contain"
+          />
+        </VideoStage>
       </PositionContext.Provider>
     </PlayerContext.Provider>
   );

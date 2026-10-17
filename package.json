@@ -33,7 +33,7 @@
   },
   "build": {
     "appId": "com.fetchly.desktop",
-    "productName": "Fetchly",
+    "productName": "Pista",
     "asar": true,
     "directories": {
       "output": "release"

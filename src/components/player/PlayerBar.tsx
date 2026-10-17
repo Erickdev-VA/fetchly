@@ -64,16 +64,56 @@ function Progress() {
 
 /** The bar along the bottom of the app: what's playing, controls, progress, volume and the queue button. */
 export function PlayerBar() {
-  const { current, playing, shuffle, repeat, volume, muted, hasPrevious, hasNext, error, queueOpen, setQueueOpen, actions } =
-    usePlayer();
+  const {
+    current,
+    playing,
+    shuffle,
+    repeat,
+    volume,
+    muted,
+    hasPrevious,
+    hasNext,
+    error,
+    queueOpen,
+    setQueueOpen,
+    videoOpen,
+    openVideo,
+    fullscreen,
+    toggleFullscreen,
+    idle,
+    actions,
+  } = usePlayer();
   const picker = usePlaylistPicker();
   const track = current?.track ?? null;
+  const isVideo = track?.kind === "video";
   const volumeIcon: PlayerIconName = muted || volume === 0 ? "volume-off" : volume < 0.5 ? "volume-low" : "volume";
 
   return (
-    <footer className="grid h-[76px] shrink-0 grid-cols-[minmax(0,3fr)_minmax(240px,4fr)_minmax(0,3fr)] items-center gap-4 border-t border-white/[0.06] bg-[#0d0d10] px-4">
+    <footer
+      className={`grid h-[76px] shrink-0 grid-cols-[minmax(0,3fr)_minmax(240px,4fr)_minmax(0,3fr)] items-center gap-4 border-t border-white/[0.06] px-4 ${
+        // Full screen: it floats over the video and slides away while the mouse rests.
+        fullscreen ? `fixed inset-x-0 bottom-0 z-30 bg-[#0d0d10]/90 backdrop-blur transition-transform duration-300 ${idle ? "translate-y-full" : ""}` : "relative z-30 bg-[#0d0d10]"
+      }`}
+    >
       <div className="flex min-w-0 items-center gap-3">
-        {track ? (
+        {track && isVideo ? (
+          // A video: its thumbnail brings the picture back, full window.
+          <button
+            type="button"
+            onClick={openVideo}
+            disabled={videoOpen}
+            title={videoOpen ? undefined : "Ver video"}
+            aria-label="Ver video"
+            className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            <LibraryThumb id={track.id} hasThumbnail={track.hasThumbnail} fallbackIcon="video" className="h-full w-full" />
+            {!videoOpen && (
+              <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                <PlayerIcon name="expand" size={16} />
+              </span>
+            )}
+          </button>
+        ) : track ? (
           <LibraryThumb id={track.id} hasThumbnail={track.hasThumbnail} fallbackIcon="music" className="h-12 w-12 shrink-0 rounded-lg" />
         ) : (
           <div className="h-12 w-12 shrink-0 rounded-lg bg-white/[0.05]" />
@@ -89,14 +129,15 @@ export function PlayerBar() {
                   {error}
                 </p>
               ) : (
-                <p className="truncate text-xs text-white/45">{track.artist ?? "—"}</p>
+                <p className="truncate text-xs text-white/45">{track.artist ?? (isVideo ? "Video" : "—")}</p>
               )}
             </>
           ) : (
             <p className="truncate text-sm text-white/35">Nada en reproducción</p>
           )}
         </div>
-        {track && <IconButton icon="plus" label="Añadir a playlist" onClick={() => picker.addToPlaylist([track])} size={16} />}
+        {/* Playlists hold songs only. */}
+        {track && !isVideo && <IconButton icon="plus" label="Añadir a playlist" onClick={() => picker.addToPlaylist([track])} size={16} />}
       </div>
 
       <div className="mx-auto flex w-full max-w-[520px] flex-col items-center gap-0.5">
@@ -135,6 +176,16 @@ export function PlayerBar() {
           valueText={`${Math.round((muted ? 0 : volume) * 100)}%`}
           className="hidden w-24 lg:block"
         />
+        {isVideo && (
+          <IconButton
+            icon={fullscreen ? "fullscreen-exit" : "fullscreen"}
+            label={fullscreen ? "Salir de pantalla completa (Esc)" : "Pantalla completa (F)"}
+            onClick={() => {
+              if (!videoOpen) openVideo();
+              toggleFullscreen();
+            }}
+          />
+        )}
         <IconButton icon="queue" label="Cola" active={queueOpen} onClick={() => setQueueOpen(!queueOpen)} />
         <IconButton icon="mini" label="Mini reproductor" onClick={() => desktop()?.mini.open()} />
       </div>

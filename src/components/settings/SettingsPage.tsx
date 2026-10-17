@@ -8,6 +8,7 @@ import {
   fetchStorage,
   fetchYtDlpVersion,
   moveLibrary,
+  setMiniAutoShow,
   setShareableDefault,
   startImport,
   updateYtDlp,
@@ -64,6 +65,40 @@ function Button({
     >
       {children}
     </button>
+  );
+}
+
+/** A setting that's on or off: its label and explanation, and the switch. */
+function SwitchRow({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-4">
+      <span>
+        <span className="block text-sm text-white/85">{label}</span>
+        <span className="mt-0.5 block text-xs text-white/45">{hint}</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? "bg-[var(--accent)]" : "bg-white/15"}`}
+      >
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${checked ? "left-[18px]" : "left-0.5"}`} />
+      </button>
+    </label>
   );
 }
 
@@ -206,7 +241,7 @@ export function SettingsPage() {
   const totalUsed = storage ? storage.music.bytes + storage.video.bytes : 0;
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-8">
+    <div className="mx-auto w-full max-w-3xl px-6 py-8 lg:max-w-4xl lg:px-10">
       <PageHeader title="Ajustes" />
       {loadError && !info && <ErrorBanner message={loadError} />}
 
@@ -287,40 +322,36 @@ export function SettingsPage() {
         </Section>
 
         <Section title="Descargas">
-          <label className="flex cursor-pointer items-start justify-between gap-4">
-            <span>
-              <span className="block text-sm text-white/85">Compatible con WhatsApp, activado por defecto</span>
-              <span className="mt-0.5 block text-xs text-white/45">
-                Convierte a H.264/AAC cuando hace falta, para poder enviar el archivo por WhatsApp. Tarda un poco más.
-              </span>
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={info?.settings.shareableDefault ?? true}
-              disabled={!info}
-              onClick={() => {
-                if (!info) return;
-                const value = !info.settings.shareableDefault;
-                setInfo({ ...info, settings: { ...info.settings, shareableDefault: value } });
-                setShareableDefault(value).catch(() => void refresh());
-              }}
-              className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${
-                info?.settings.shareableDefault ?? true ? "bg-[var(--accent)]" : "bg-white/15"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left] ${
-                  info?.settings.shareableDefault ?? true ? "left-[18px]" : "left-0.5"
-                }`}
-              />
-            </button>
-          </label>
+          <SwitchRow
+            label="Compatible con WhatsApp, activado por defecto"
+            hint="Convierte a H.264/AAC cuando hace falta, para poder enviar el archivo por WhatsApp. Tarda un poco más."
+            checked={info?.settings.shareableDefault ?? true}
+            disabled={!info}
+            onChange={(value) => {
+              if (!info) return;
+              setInfo({ ...info, settings: { ...info.settings, shareableDefault: value } });
+              setShareableDefault(value).catch(() => void refresh());
+            }}
+          />
+        </Section>
+
+        <Section title="Mini reproductor">
+          <SwitchRow
+            label="Mostrar el mini reproductor al salir de la app"
+            hint="Si hay música sonando y minimizas Pista o cambias a otra aplicación, aparece el mini reproductor. Al volver a Pista se oculta."
+            checked={info?.settings.miniAutoShow ?? true}
+            disabled={!info}
+            onChange={(value) => {
+              if (!info) return;
+              setInfo({ ...info, settings: { ...info.settings, miniAutoShow: value } });
+              setMiniAutoShow(value).catch(() => void refresh());
+            }}
+          />
         </Section>
 
         <Section title="Acerca de">
           <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-2 text-sm">
-            <dt className="text-white/50">Fetchly</dt>
+            <dt className="text-white/50">Pista</dt>
             <dd className="text-white/85">{info?.version ? `Versión ${info.version}` : "—"}</dd>
             <dt className="text-white/50">yt-dlp</dt>
             <dd className="flex flex-wrap items-center gap-3 text-white/85">

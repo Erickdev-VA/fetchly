@@ -19,3 +19,31 @@ export async function removeFromLibrary(entry: LibraryEntry): Promise<void> {
     throw new Error("El archivo está en la Papelera, pero no se pudo quitar de la biblioteca.");
   }
 }
+
+/**
+ * "Borrar" for several songs: one at a time, carrying on past failures.
+ * `before` runs ahead of each one (to stop it if it's playing). Returns
+ * how many went and the first error, if any failed.
+ */
+export async function removeManyFromLibrary(
+  entries: LibraryEntry[],
+  before: (entry: LibraryEntry) => void,
+): Promise<{ removed: number; failed: number; firstError: string | null }> {
+  let removed = 0;
+  let firstError: string | null = null;
+  for (const entry of entries) {
+    try {
+      before(entry);
+      await removeFromLibrary(entry);
+      removed++;
+    } catch (err) {
+      firstError ??= err instanceof Error ? err.message : "No se pudo borrar.";
+    }
+  }
+  return { removed, failed: entries.length - removed, firstError };
+}
+
+/** "3 canciones" / "1 canción" */
+export function songCount(n: number): string {
+  return `${n} canci${n === 1 ? "ón" : "ones"}`;
+}

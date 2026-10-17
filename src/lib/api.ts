@@ -67,6 +67,8 @@ export type BatchItemStatus = "queued" | "downloading" | "converting" | "complet
 export interface BatchProgress {
   running: boolean;
   cancelled: boolean;
+  /** Set while YouTube is refusing downloads: when the batch goes on by itself (ms since epoch). */
+  pausedUntil: number | null;
   category: Category;
   items: {
     entryId: string;
@@ -100,6 +102,10 @@ export function getBatchProgress(batchId: string): Promise<BatchProgress> {
 
 export function cancelBatch(batchId: string): Promise<unknown> {
   return fetch(`/api/batch/${batchId}/cancel`, { method: "POST" });
+}
+
+export function resumeBatch(batchId: string): Promise<unknown> {
+  return fetch(`/api/batch/${batchId}/resume`, { method: "POST" });
 }
 
 export function discardBatch(batchId: string): Promise<unknown> {
@@ -182,7 +188,7 @@ export async function addToPlaylist(id: string, itemIds: string[]): Promise<numb
 }
 
 export interface AppSettings {
-  settings: { libraryDir: string | null; shareableDefault: boolean };
+  settings: { libraryDir: string | null; shareableDefault: boolean; miniAutoShow: boolean };
   library: { path: string; isDefault: boolean };
   version: string | null;
 }
@@ -193,6 +199,10 @@ export function fetchSettings(): Promise<AppSettings> {
 
 export async function setShareableDefault(value: boolean): Promise<void> {
   await fetch("/api/settings", jsonInit("PATCH", { shareableDefault: value })).then((res) => parseJsonOrThrow(res));
+}
+
+export async function setMiniAutoShow(value: boolean): Promise<void> {
+  await fetch("/api/settings", jsonInit("PATCH", { miniAutoShow: value })).then((res) => parseJsonOrThrow(res));
 }
 
 export interface LibraryMove {

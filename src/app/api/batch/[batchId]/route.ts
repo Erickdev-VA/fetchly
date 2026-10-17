@@ -13,6 +13,7 @@ export async function GET(_request: Request, context: { params: Promise<{ batchI
     return NextResponse.json({
       running: isBatchRunning(batch),
       cancelled: batch.cancelled,
+      pausedUntil: batch.pausedUntil ?? null,
       category: categoryForMode(batch.mode),
       items: batch.items.map((item) => ({
         entryId: item.entryId,

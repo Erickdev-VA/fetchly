@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { getDb } from "./db";
+import { youtubeVideoIdFromLink } from "../platform/playlist";
 import type { Category, LibraryItem } from "./types";
 import type { Platform } from "../platform/types";
 
@@ -16,6 +18,7 @@ export interface ItemRow {
   thumbnail_file: string | null;
   created_at: number;
   fingerprint: string | null;
+  source_video_id: string | null;
 }
 
 export function fromRow(row: ItemRow): LibraryItem {
@@ -57,8 +60,8 @@ export function insertItem(item: LibraryItem): void {
   getDb()
     .prepare(
       `INSERT INTO items (id, category, title, artist, duration_seconds, platform, source_url,
-                          file_path, file_size, thumbnail_file, created_at, fingerprint)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          file_path, file_size, thumbnail_file, created_at, fingerprint, source_video_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       item.id,
@@ -73,8 +76,32 @@ export function insertItem(item: LibraryItem): void {
       item.thumbnailFile,
       item.createdAt,
       item.fingerprint,
+      item.platform === "youtube" ? youtubeVideoIdFromLink(item.sourceUrl) : null,
     );
   revisionState.count++;
+}
+
+/**
+ * Which of these YouTube videos are already in the library, and in which
+ * categories. An entry whose file is gone ("No encontrado") doesn't count,
+ * so downloading the playlist again brings it back.
+ */
+export function findOwnedVideos(videoIds: string[]): Map<string, Category[]> {
+  const owned = new Map<string, Category[]>();
+  if (videoIds.length === 0) return owned;
+  const rows = getDb()
+    .prepare(
+      `SELECT source_video_id, category, file_path FROM items
+       WHERE source_video_id IN (SELECT value FROM json_each(?))`,
+    )
+    .all(JSON.stringify(videoIds)) as { source_video_id: string; category: Category; file_path: string }[];
+  for (const row of rows) {
+    if (!existsSync(row.file_path)) continue;
+    const categories = owned.get(row.source_video_id) ?? [];
+    if (!categories.includes(row.category)) categories.push(row.category);
+    owned.set(row.source_video_id, categories);
+  }
+  return owned;
 }
 
 /** Every item, oldest first (moving the library, filling in fingerprints). */

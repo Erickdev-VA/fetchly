@@ -2,21 +2,24 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLibrary } from "@/hooks/useLibrary";
+import { useSelection, type Selection } from "@/hooks/useSelection";
 import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
-import { removeFromLibrary } from "@/lib/library/actions";
+import { removeFromLibrary, removeManyFromLibrary, songCount } from "@/lib/library/actions";
 import type { LibraryEntry } from "@/lib/library/types";
 import { toTrack } from "@/lib/player/types";
 import { usePlayer } from "../player/PlayerProvider";
 import { usePlaylistPicker } from "../playlists/PlaylistPicker";
+import { PlaylistShelf } from "../playlists/PlaylistShelf";
 import { PlayerIcon } from "../player/PlayerIcon";
 import { PlatformBadge } from "../PlatformBadge";
 import { ErrorBanner } from "../ErrorBanner";
-import { PageHeader } from "../shell/PageHeader";
+import { PAGE_CLASS, PageHeader } from "../shell/PageHeader";
 import { EmptyState } from "../shell/EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ItemMenu, type MenuAction } from "./ItemMenu";
 import { LibraryThumb } from "./LibraryThumb";
+import { SelectBox, SelectionBar, type BarAction } from "./ListBits";
 
 type SortKey = "recent" | "title" | "artist" | "duration";
 
@@ -62,7 +65,8 @@ export function MusicLibrary() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
   const [menu, setMenu] = useState<{ entry: LibraryEntry; x: number; y: number } | null>(null);
-  const [confirming, setConfirming] = useState<LibraryEntry | null>(null);
+  /** The songs "Borrar" asked about: one from its menu, or the selection. */
+  const [confirming, setConfirming] = useState<LibraryEntry[] | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const bridge = desktop();
   const player = usePlayer();
@@ -77,6 +81,12 @@ export function MusicLibrary() {
       : items;
     return sortEntries(matches, sort);
   }, [items, query, sort]);
+  const visibleIds = useMemo(() => visible.map((e) => e.id), [visible]);
+  const selection = useSelection(visibleIds);
+  const selected = useMemo(() => {
+    const byId = new Map(visible.map((e) => [e.id, e]));
+    return selection.ids.map((id) => byId.get(id)).filter((e): e is LibraryEntry => e !== undefined);
+  }, [visible, selection.ids]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -88,6 +98,7 @@ export function MusicLibrary() {
   };
 
   const menuActions = (entry: LibraryEntry): MenuAction[] => [
+    { label: "Seleccionar", onSelect: () => selection.start(entry.id) },
     { label: "Reproducir", disabled: entry.missing, onSelect: () => playFromList(entry) },
     { label: "Reproducir a continuación", disabled: entry.missing, onSelect: () => player.actions.playNext([toTrack(entry)]) },
     { label: "Añadir a la cola", disabled: entry.missing, onSelect: () => player.actions.addToQueue([toTrack(entry)]) },
@@ -102,21 +113,33 @@ export function MusicLibrary() {
           {
             label: entry.missing ? "Quitar de la biblioteca" : "Borrar",
             danger: true,
-            onSelect: () => setConfirming(entry),
+            onSelect: () => setConfirming([entry]),
           },
         ]
       : []),
   ];
 
   const confirmRemove = async () => {
-    const entry = confirming;
+    const entries = confirming;
     setConfirming(null);
-    if (!entry) return;
+    if (!entries) return;
+    // Stop each one first if it's playing, so Windows doesn't see the file as in use.
+    const forget = (entry: LibraryEntry) => player.actions.forgetTrack(entry.id);
     try {
-      // Stop it first if it's playing, so Windows doesn't see the file as in use.
-      player.actions.forgetTrack(entry.id);
-      await removeFromLibrary(entry);
-      setActionError(null);
+      if (entries.length === 1) {
+        forget(entries[0]);
+        await removeFromLibrary(entries[0]);
+        setActionError(null);
+      } else {
+        const { removed, failed, firstError } = await removeManyFromLibrary(entries, forget);
+        if (failed > 0) {
+          setActionError(`Se borraron ${removed} de ${entries.length}. ${firstError ?? ""}`.trim());
+        } else {
+          setActionError(null);
+          picker.notify(`${songCount(removed)} ${removed === 1 ? "enviada" : "enviadas"} a la Papelera`);
+        }
+      }
+      selection.clear();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "No se pudo borrar.");
     } finally {
@@ -124,10 +147,28 @@ export function MusicLibrary() {
     }
   };
 
+  const playable = selected.filter((e) => !e.missing);
+  const barActions: BarAction[] = [
+    {
+      label: "Reproducir",
+      primary: true,
+      disabled: playable.length === 0,
+      onSelect: () => player.actions.playTracks(playable.map(toTrack), 0),
+    },
+    {
+      label: "Reproducir a continuación",
+      disabled: playable.length === 0,
+      onSelect: () => player.actions.playNext(playable.map(toTrack)),
+    },
+    { label: "Añadir a la cola", disabled: playable.length === 0, onSelect: () => player.actions.addToQueue(playable.map(toTrack)) },
+    { label: "Añadir a playlist…", onSelect: () => picker.addToPlaylist(selected) },
+    ...(bridge ? [{ label: "Borrar", danger: true, onSelect: () => setConfirming(selected) }] : []),
+  ];
+
   const count = items?.length ?? 0;
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-8">
+    <div className={PAGE_CLASS}>
       <PageHeader
         title="Música"
         subtitle={items && count > 0 ? `${count} canci${count === 1 ? "ón" : "ones"}` : undefined}
@@ -140,12 +181,15 @@ export function MusicLibrary() {
         </div>
       )}
 
+      {items && <PlaylistShelf hideWhenEmpty={count === 0} />}
+
       {items && count === 0 && (
         <EmptyState icon="music" text="Aún no tienes música. Ve a Descargar." action={{ href: "/", label: "Ir a Descargar" }} />
       )}
 
       {items && count > 0 && (
         <>
+          <h2 className="mb-3 text-[15px] font-semibold text-white">Canciones</h2>
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 transition-colors focus-within:border-white/25">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-white/35" aria-hidden>
@@ -187,31 +231,65 @@ export function MusicLibrary() {
                   entry={entry}
                   isCurrent={entry.id === currentId}
                   isPlaying={entry.id === currentId && player.playing}
+                  selection={selection}
                   onPlay={() => playFromList(entry)}
                   onMenu={(x, y) => setMenu({ entry, x, y })}
                 />
               ))}
             </ul>
           )}
+          <SelectionBar
+            active={selection.active}
+            count={selection.count}
+            total={visible.length}
+            actions={barActions}
+            onSelectAll={selection.selectAll}
+            onClear={selection.clear}
+          />
         </>
       )}
 
       {menu && <ItemMenu x={menu.x} y={menu.y} actions={menuActions(menu.entry)} onClose={closeMenu} />}
 
-      {confirming && (
-        <ConfirmDialog
-          title={confirming.missing ? "¿Quitar de la biblioteca?" : "¿Borrar esta canción?"}
-          message={
-            confirming.missing
-              ? `«${confirming.title}» ya no está en su carpeta. Se quitará de la lista.`
-              : `«${confirming.title}» irá a la Papelera de Windows. Desde ahí puedes recuperarla.`
-          }
-          confirmLabel={confirming.missing ? "Quitar" : "Borrar"}
-          onConfirm={() => void confirmRemove()}
-          onCancel={() => setConfirming(null)}
-        />
-      )}
+      {confirming && <RemoveDialog entries={confirming} onConfirm={() => void confirmRemove()} onCancel={() => setConfirming(null)} />}
     </div>
+  );
+}
+
+/** "¿Borrar…?" for one song or several; a song whose file is already gone is only taken off the list. */
+export function RemoveDialog({
+  entries,
+  onConfirm,
+  onCancel,
+}: {
+  entries: LibraryEntry[];
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const [first] = entries;
+  if (entries.length === 1) {
+    return (
+      <ConfirmDialog
+        title={first.missing ? "¿Quitar de la biblioteca?" : "¿Borrar esta canción?"}
+        message={
+          first.missing
+            ? `«${first.title}» ya no está en su carpeta. Se quitará de la lista.`
+            : `«${first.title}» irá a la Papelera de Windows. Desde ahí puedes recuperarla.`
+        }
+        confirmLabel={first.missing ? "Quitar" : "Borrar"}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />
+    );
+  }
+  return (
+    <ConfirmDialog
+      title={`¿Borrar ${songCount(entries.length)}?`}
+      message="Irán a la Papelera de Windows, y desde ahí puedes recuperarlas. También se quitan de todas tus playlists."
+      confirmLabel={`Borrar ${songCount(entries.length)}`}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }
 
@@ -219,20 +297,27 @@ function TrackRow({
   entry,
   isCurrent,
   isPlaying,
+  selection,
   onPlay,
   onMenu,
 }: {
   entry: LibraryEntry;
   isCurrent: boolean;
   isPlaying: boolean;
+  selection: Selection;
   onPlay: () => void;
   onMenu: (x: number, y: number) => void;
 }) {
   const duration = formatDuration(entry.durationSeconds);
+  const checked = selection.has(entry.id);
   return (
     <li
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest("button")) return;
+        selection.rowClick(entry.id, e);
+      }}
       onDoubleClick={(e) => {
-        if (entry.missing || (e.target as HTMLElement).closest("button")) return;
+        if (selection.active || entry.missing || (e.target as HTMLElement).closest("button")) return;
         onPlay();
       }}
       onContextMenu={(e) => {
@@ -240,9 +325,12 @@ function TrackRow({
         onMenu(e.clientX, e.clientY);
       }}
       className={`group flex select-none items-center gap-3 px-3 py-2 transition ${
-        isCurrent ? "bg-[var(--accent)]/[0.08]" : "hover:bg-white/[0.03]"
-      } ${entry.missing ? "opacity-50" : ""}`}
+        checked ? "bg-white/[0.08]" : isCurrent ? "bg-[var(--accent)]/[0.08]" : "hover:bg-white/[0.03]"
+      } ${selection.active ? "cursor-pointer" : ""} ${entry.missing ? "opacity-50" : ""}`}
     >
+      {selection.active && (
+        <SelectBox checked={checked} label={`Seleccionar ${entry.title}`} onToggle={(range) => selection.toggle(entry.id, range)} />
+      )}
       <div className="relative h-10 w-10 shrink-0">
         <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="music" className="h-10 w-10 rounded-md" />
         {!entry.missing && (

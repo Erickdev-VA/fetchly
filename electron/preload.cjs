@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld("fetchly", {
     },
   },
   mini: {
-    /** From the main window: opens the mini player (or brings it forward). */
+    /** From the main window: switches to the mini player (minimizes Fetchly and shows it). */
     open: () => ipcRenderer.send("mini:open"),
     // The rest only answer the mini player's own window.
     getState: () => ipcRenderer.invoke("mini:get-state"),
@@ -35,7 +35,6 @@ contextBridge.exposeInMainWorld("fetchly", {
       return () => ipcRenderer.removeListener("mini:state", wrapped);
     },
     command: (command) => ipcRenderer.send("mini:command", command),
-    setPinned: (pinned) => ipcRenderer.invoke("mini:set-pinned", pinned),
     close: () => ipcRenderer.send("mini:close"),
     showApp: () => ipcRenderer.send("mini:show-app"),
   },

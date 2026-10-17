@@ -77,12 +77,12 @@ export default function DownloadPage() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center gap-8 px-6 py-8">
+      <div className="mx-auto flex w-full max-w-xl lg:max-w-2xl flex-1 flex-col items-center gap-8 px-6 py-8">
         <div className="w-full">
           <PageHeader title="Descargar" subtitle="Pega un enlace de YouTube, TikTok, Instagram o X." />
         </div>
 
-        <div className="flex w-full max-w-xl flex-col items-center gap-3">
+        <div className="flex w-full max-w-xl lg:max-w-2xl flex-col items-center gap-3">
           <UrlInputBar
             value={url}
             onChange={setUrl}
@@ -103,7 +103,7 @@ export default function DownloadPage() {
           {pasteNotice && <p className="text-center text-xs text-white/40">{pasteNotice}</p>}
         </div>
 
-        <div className="flex w-full max-w-xl flex-col items-center gap-4">
+        <div className="flex w-full max-w-xl lg:max-w-2xl flex-col items-center gap-4">
           {status === "analyzing" && <AnalyzingIndicator />}
           {status === "error" && error && <ErrorBanner message={error} onDismiss={() => setStatus("idle")} />}
           {status === "ready" && media?.kind === "media" && (

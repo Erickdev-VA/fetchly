@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Fetchly",
+  title: "Pista",
   description: "Descarga música y videos de YouTube, TikTok, Instagram y X, y escúchalos en tu biblioteca.",
 };
 

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
-    <title>Fetchly</title>
+    <title>Pista</title>
     <style>
       html,
       body {
@@ -23,9 +23,16 @@
         -webkit-user-select: none;
         cursor: default;
       }
+      .logo {
+        width: 64px;
+        height: 64px;
+      }
+      /* The logo's heavy serif. */
       .name {
-        font-size: 22px;
-        font-weight: 600;
+        margin-top: -6px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 30px;
+        font-weight: 700;
         letter-spacing: -0.01em;
       }
       .bar {
@@ -42,7 +49,7 @@
         inset: 0;
         width: 40%;
         border-radius: 3px;
-        background: #635bff;
+        background: #6d5dfc;
         animation: slide 1.1s ease-in-out infinite;
       }
       @keyframes slide {
@@ -63,7 +70,17 @@
     </style>
   </head>
   <body>
-    <div class="name">Fetchly</div>
-    <div class="bar" role="progressbar" aria-label="Iniciando Fetchly"></div>
+    <!-- Same shapes as electron/assets/logo.svg. -->
+    <svg class="logo" viewBox="0 0 100 100" aria-hidden="true">
+      <rect width="100" height="100" rx="22" fill="#6d5dfc" />
+      <rect x="31" y="11.8" width="9.4" height="68.7" rx="4.7" fill="#fff" />
+      <path
+        fill-rule="evenodd"
+        fill="#fff"
+        d="M57.6 15.1a20.2 20.2 0 1 1 0 40.4a20.2 20.2 0 1 1 0-40.4ZM56.5 27.5a7.8 7.8 0 1 0 0 15.6a7.8 7.8 0 1 0 0-15.6Z"
+      />
+    </svg>
+    <div class="name">Pista</div>
+    <div class="bar" role="progressbar" aria-label="Iniciando Pista"></div>
   </body>
 </html>

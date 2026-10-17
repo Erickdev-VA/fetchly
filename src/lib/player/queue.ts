@@ -1,3 +1,4 @@
+import { moveBeside } from "../reorder";
 import type { QueueEntry, Track } from "./types";
 
 /**
@@ -66,6 +67,25 @@ export function insertNext(state: QueueState, entries: QueueEntry[]): QueueState
 export function append(state: QueueState, entries: QueueEntry[]): QueueState {
   if (state.order.length === 0) return newQueue(entries, 0, false);
   return { base: [...state.base, ...entries], order: [...state.order, ...entries], index: state.index };
+}
+
+/**
+ * Moves the upcoming slots `uids` to just before or after `targetUid`,
+ * another upcoming slot: what plays next is what the user dragged there.
+ * Done in both orders, so the change survives turning shuffle off. The
+ * current song and the ones already played don't move.
+ */
+export function moveUpcoming(state: QueueState, uids: string[], targetUid: string, after: boolean): QueueState {
+  const upcoming = state.order.slice(state.index + 1);
+  const moving = new Set(uids.filter((uid) => upcoming.some((e) => e.uid === uid)));
+  if (moving.size === 0 || moving.has(targetUid) || !upcoming.some((e) => e.uid === targetUid)) return state;
+  const moved = (e: QueueEntry) => moving.has(e.uid);
+  const target = (e: QueueEntry) => e.uid === targetUid;
+  return {
+    base: moveBeside(state.base, moved, target, after),
+    order: [...state.order.slice(0, state.index + 1), ...moveBeside(upcoming, moved, target, after)],
+    index: state.index,
+  };
 }
 
 /**

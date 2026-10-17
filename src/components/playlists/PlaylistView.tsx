@@ -2,34 +2,33 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useDragReorder } from "@/hooks/useDragReorder";
 import { usePlaylist } from "@/hooks/useLibrary";
-import { deletePlaylist, updatePlaylist } from "@/lib/api";
+import { useSelection } from "@/hooks/useSelection";
+import { deletePlaylist, fetchPlaylist, updatePlaylist } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
+import { removeFromLibrary, removeManyFromLibrary, songCount } from "@/lib/library/actions";
 import type { LibraryEntry } from "@/lib/library/types";
 import { toTrack } from "@/lib/player/types";
+import { moveIds } from "@/lib/reorder";
 import { ErrorBanner } from "../ErrorBanner";
+import { PAGE_CLASS } from "../shell/PageHeader";
 import { ConfirmDialog } from "../library/ConfirmDialog";
 import { ItemMenu, type MenuAction } from "../library/ItemMenu";
 import { LibraryThumb } from "../library/LibraryThumb";
+import { DropLine, GripDots, SelectBox, SelectionBar, type BarAction } from "../library/ListBits";
+import { RemoveDialog } from "../library/MusicLibrary";
 import { PlayerIcon } from "../player/PlayerIcon";
 import { usePlayer } from "../player/PlayerProvider";
 import { NameDialog } from "./NameDialog";
 import { PlaylistMosaic } from "./PlaylistMosaic";
 import { playlistMeta, usePlaylistPicker } from "./PlaylistPicker";
 
-/** `ids` with `moved` taken out and put back before (or after) `target`. */
-function reorder(ids: string[], moved: string, target: string, after: boolean): string[] {
-  if (moved === target) return ids;
-  const rest = ids.filter((id) => id !== moved);
-  const at = rest.indexOf(target);
-  if (at < 0) return ids;
-  rest.splice(after ? at + 1 : at, 0, moved);
-  return rest;
-}
+const NO_ITEMS: LibraryEntry[] = [];
 
-/** One playlist: play or shuffle it, rename or delete it, and reorder or remove its songs. */
+/** One playlist: play or shuffle it, rename or delete it, and reorder, move or remove its songs. */
 export function PlaylistView({ id }: { id: string }) {
   const { playlist, error, reload } = usePlaylist(id);
   const player = usePlayer();
@@ -38,34 +37,27 @@ export function PlaylistView({ id }: { id: string }) {
   const bridge = desktop();
   // The order shown while a change is on its way to the server.
   const [pendingOrder, setPendingOrder] = useState<string[] | null>(null);
-  const [dragging, setDragging] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null);
   const [menu, setMenu] = useState<{ entry: LibraryEntry; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  /** Songs "Borrar" asked about: their files go to the Recycle Bin. */
+  const [confirmingRemove, setConfirmingRemove] = useState<LibraryEntry[] | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  if (!playlist) {
-    return (
-      <div className="mx-auto w-full max-w-5xl px-6 py-8">
-        <BackLink />
-        {error && <ErrorBanner message={error} />}
-      </div>
-    );
-  }
+  const loaded = playlist?.items ?? NO_ITEMS;
+  const items = useMemo(() => {
+    if (!pendingOrder) return loaded;
+    const byId = new Map(loaded.map((e) => [e.id, e]));
+    return pendingOrder.map((itemId) => byId.get(itemId)).filter((e): e is LibraryEntry => e !== undefined);
+  }, [loaded, pendingOrder]);
+  const ids = useMemo(() => items.map((e) => e.id), [items]);
+  const selection = useSelection(ids);
 
-  const byId = new Map(playlist.items.map((e) => [e.id, e]));
-  const items = pendingOrder
-    ? pendingOrder.map((itemId) => byId.get(itemId)).filter((e): e is LibraryEntry => e !== undefined)
-    : playlist.items;
-  const playable = items.filter((e) => !e.missing);
-  const currentId = player.current?.track.id ?? null;
-
-  const saveOrder = async (ids: string[]) => {
-    setPendingOrder(ids);
+  const saveOrder = async (next: string[]) => {
+    setPendingOrder(next);
     try {
-      await updatePlaylist(id, { itemIds: ids });
+      await updatePlaylist(id, { itemIds: next });
       setActionError(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "No se pudo guardar el orden.");
@@ -75,15 +67,80 @@ export function PlaylistView({ id }: { id: string }) {
     }
   };
 
-  const ids = items.map((e) => e.id);
+  const drag = useDragReorder({
+    // Grabbing a selected song takes the whole selection with it.
+    group: (itemId) => (selection.has(itemId) ? selection.ids : [itemId]),
+    label: songCount,
+    onMove: (moved, spot) => {
+      const next = moveIds(ids, moved, spot.target, spot.after);
+      if (next.join() !== ids.join()) void saveOrder(next);
+    },
+  });
+
+  if (!playlist) {
+    return (
+      <div className={PAGE_CLASS}>
+        <BackLink />
+        {error && <ErrorBanner message={error} />}
+      </div>
+    );
+  }
+
+  const playable = items.filter((e) => !e.missing);
+  const currentId = player.current?.track.id ?? null;
+  const selected = items.filter((e) => selection.has(e.id));
+  const selectedPlayable = selected.filter((e) => !e.missing);
+
   const move = (entry: LibraryEntry, step: -1 | 1) => {
-    const index = ids.indexOf(entry.id);
-    const neighbor = ids[index + step];
-    if (neighbor) void saveOrder(reorder(ids, entry.id, neighbor, step === 1));
+    const neighbor = ids[ids.indexOf(entry.id) + step];
+    if (neighbor) void saveOrder(moveIds(ids, [entry.id], neighbor, step === 1));
   };
-  const remove = (entry: LibraryEntry) => {
-    void saveOrder(ids.filter((itemId) => itemId !== entry.id));
-    picker.notify(`«${entry.title}» se quitó de la playlist`);
+  /** Takes songs out of this playlist (they stay in Música). */
+  const removeFromHere = (entries: LibraryEntry[]) => {
+    const gone = new Set(entries.map((e) => e.id));
+    void saveOrder(ids.filter((itemId) => !gone.has(itemId)));
+    selection.clear();
+    picker.notify(entries.length === 1 ? `«${entries[0].title}» se quitó de la playlist` : `${songCount(entries.length)} quitadas de la playlist`);
+  };
+  /** "Mover a otra playlist…": the picker adds them there, then they leave this one. */
+  const moveToOther = (entries: LibraryEntry[]) => {
+    const gone = new Set(entries.map((e) => e.id));
+    picker.addToPlaylist(entries, {
+      playlistId: id,
+      onMoved: async () => {
+        // Read it again: it may have changed while the picker was open.
+        const { playlist: fresh } = await fetchPlaylist(id);
+        await updatePlaylist(id, { itemIds: fresh.items.map((e) => e.id).filter((itemId) => !gone.has(itemId)) });
+        selection.clear();
+        await reload();
+      },
+    });
+  };
+
+  const confirmRemove = async () => {
+    const entries = confirmingRemove;
+    setConfirmingRemove(null);
+    if (!entries) return;
+    const forget = (entry: LibraryEntry) => player.actions.forgetTrack(entry.id);
+    try {
+      if (entries.length === 1) {
+        forget(entries[0]);
+        await removeFromLibrary(entries[0]);
+        setActionError(null);
+      } else {
+        const { removed, failed, firstError } = await removeManyFromLibrary(entries, forget);
+        if (failed > 0) setActionError(`Se borraron ${removed} de ${entries.length}. ${firstError ?? ""}`.trim());
+        else {
+          setActionError(null);
+          picker.notify(`${songCount(removed)} ${removed === 1 ? "enviada" : "enviadas"} a la Papelera`);
+        }
+      }
+      selection.clear();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "No se pudo borrar.");
+    } finally {
+      await reload();
+    }
   };
 
   const playFrom = (entry: LibraryEntry) => {
@@ -94,28 +151,53 @@ export function PlaylistView({ id }: { id: string }) {
   const menuActions = (entry: LibraryEntry): MenuAction[] => {
     const index = ids.indexOf(entry.id);
     return [
+      { label: "Seleccionar", onSelect: () => selection.start(entry.id) },
       { label: "Reproducir", disabled: entry.missing, onSelect: () => playFrom(entry) },
       { label: "Reproducir a continuación", disabled: entry.missing, onSelect: () => player.actions.playNext([toTrack(entry)]) },
       { label: "Añadir a la cola", disabled: entry.missing, onSelect: () => player.actions.addToQueue([toTrack(entry)]) },
       { label: "Añadir a otra playlist…", onSelect: () => picker.addToPlaylist([entry]) },
+      { label: "Mover a otra playlist…", onSelect: () => moveToOther([entry]) },
       { label: "Subir", disabled: index <= 0, onSelect: () => move(entry, -1) },
       { label: "Bajar", disabled: index >= ids.length - 1, onSelect: () => move(entry, 1) },
       ...(bridge
         ? [{ label: "Mostrar en carpeta", disabled: entry.missing, onSelect: () => void bridge.showItemInFolder(entry.filePath) }]
         : []),
-      { label: "Quitar de esta playlist", danger: true, onSelect: () => remove(entry) },
+      { label: "Quitar de esta playlist", danger: true, onSelect: () => removeFromHere([entry]) },
     ];
   };
 
+  const barActions: BarAction[] = [
+    {
+      label: "Reproducir",
+      primary: true,
+      disabled: selectedPlayable.length === 0,
+      onSelect: () => player.actions.playTracks(selectedPlayable.map(toTrack), 0),
+    },
+    {
+      label: "Reproducir a continuación",
+      disabled: selectedPlayable.length === 0,
+      onSelect: () => player.actions.playNext(selectedPlayable.map(toTrack)),
+    },
+    {
+      label: "Añadir a la cola",
+      disabled: selectedPlayable.length === 0,
+      onSelect: () => player.actions.addToQueue(selectedPlayable.map(toTrack)),
+    },
+    { label: "Añadir a otra playlist…", onSelect: () => picker.addToPlaylist(selected) },
+    { label: "Mover a otra playlist…", onSelect: () => moveToOther(selected) },
+    { label: "Quitar de esta playlist", onSelect: () => removeFromHere(selected) },
+    ...(bridge ? [{ label: "Borrar", danger: true, onSelect: () => setConfirmingRemove(selected) }] : []),
+  ];
+
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-8">
+    <div className={PAGE_CLASS}>
       <BackLink />
 
       <header className="mb-6 flex flex-col gap-5 sm:flex-row sm:items-end">
-        <PlaylistMosaic coverIds={playlist.coverIds} className="aspect-square w-40 shrink-0 rounded-2xl shadow-2xl shadow-black/50" />
+        <PlaylistMosaic coverIds={playlist.coverIds} className="aspect-square w-40 shrink-0 rounded-2xl lg:w-52 shadow-2xl shadow-black/50" />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium uppercase tracking-wider text-white/40">Playlist</p>
-          <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-white">{playlist.name}</h1>
+          <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-white lg:text-4xl">{playlist.name}</h1>
           <p className="mt-1 text-sm text-white/45">{playlistMeta(playlist.count, playlist.durationSeconds)}</p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
@@ -166,38 +248,17 @@ export function PlaylistView({ id }: { id: string }) {
         <ol className="divide-y divide-white/[0.05] rounded-2xl border border-white/[0.06]">
           {items.map((entry, index) => {
             const isCurrent = entry.id === currentId;
-            const marker = dropTarget?.id === entry.id && dragging !== entry.id ? (dropTarget.after ? "after" : "before") : null;
+            const checked = selection.has(entry.id);
             return (
               <li
                 key={entry.id}
-                draggable
-                onDragStart={(e) => {
-                  setDragging(entry.id);
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData("text/plain", entry.id);
-                }}
-                onDragOver={(e) => {
-                  if (!dragging) return;
-                  e.preventDefault();
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const after = e.clientY > rect.top + rect.height / 2;
-                  if (dropTarget?.id !== entry.id || dropTarget.after !== after) setDropTarget({ id: entry.id, after });
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (dragging && dropTarget) {
-                    const next = reorder(ids, dragging, dropTarget.id, dropTarget.after);
-                    if (next.join() !== ids.join()) void saveOrder(next);
-                  }
-                  setDragging(null);
-                  setDropTarget(null);
-                }}
-                onDragEnd={() => {
-                  setDragging(null);
-                  setDropTarget(null);
+                {...drag.rowProps(entry.id)}
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest("button")) return;
+                  selection.rowClick(entry.id, e);
                 }}
                 onDoubleClick={(e) => {
-                  if (entry.missing || (e.target as HTMLElement).closest("button")) return;
+                  if (selection.active || entry.missing || (e.target as HTMLElement).closest("button")) return;
                   playFrom(entry);
                 }}
                 onContextMenu={(e) => {
@@ -205,21 +266,21 @@ export function PlaylistView({ id }: { id: string }) {
                   setMenu({ entry, x: e.clientX, y: e.clientY });
                 }}
                 className={`group relative flex select-none items-center gap-3 px-3 py-2 transition ${
-                  isCurrent ? "bg-[var(--accent)]/[0.08]" : "hover:bg-white/[0.03]"
-                } ${entry.missing ? "opacity-50" : ""} ${dragging === entry.id ? "opacity-40" : ""}`}
+                  checked ? "bg-white/[0.08]" : isCurrent ? "bg-[var(--accent)]/[0.08]" : "hover:bg-white/[0.03]"
+                } ${entry.missing ? "opacity-50" : ""} ${drag.isDragging(entry.id) ? "opacity-40" : ""}`}
               >
-                {marker && (
-                  <span
-                    className={`pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-[var(--accent)] ${
-                      marker === "before" ? "-top-px" : "-bottom-px"
-                    }`}
-                  />
+                <DropLine at={drag.marker(entry.id)} />
+                {selection.active && (
+                  <SelectBox checked={checked} label={`Seleccionar ${entry.title}`} onToggle={(range) => selection.toggle(entry.id, range)} />
                 )}
                 <span
-                  className="w-5 shrink-0 cursor-grab text-center text-xs tabular-nums text-white/35 active:cursor-grabbing"
+                  className="flex w-5 shrink-0 cursor-grab justify-center text-xs tabular-nums text-white/35 active:cursor-grabbing"
                   title="Arrastra para cambiar el orden"
                 >
-                  {index + 1}
+                  <span className="group-hover:hidden">{index + 1}</span>
+                  <span className="hidden text-white/55 group-hover:block">
+                    <GripDots />
+                  </span>
                 </span>
                 <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="music" className="h-10 w-10 shrink-0 rounded-md" />
                 <div className="min-w-0 flex-1">
@@ -237,7 +298,7 @@ export function PlaylistView({ id }: { id: string }) {
                   type="button"
                   aria-label={`Quitar ${entry.title} de la playlist`}
                   title="Quitar de esta playlist"
-                  onClick={() => remove(entry)}
+                  onClick={() => removeFromHere([entry])}
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/45 opacity-0 outline-none transition hover:bg-white/[0.08] hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <PlayerIcon name="close" size={14} />
@@ -264,6 +325,15 @@ export function PlaylistView({ id }: { id: string }) {
         </ol>
       )}
 
+      <SelectionBar
+        active={selection.active}
+        count={selection.count}
+        total={items.length}
+        actions={barActions}
+        onSelectAll={selection.selectAll}
+        onClear={selection.clear}
+      />
+
       {menu && <ItemMenu x={menu.x} y={menu.y} actions={menuActions(menu.entry)} onClose={closeMenu} />}
 
       {renaming && (
@@ -288,11 +358,15 @@ export function PlaylistView({ id }: { id: string }) {
           onConfirm={() => {
             setConfirmingDelete(false);
             void deletePlaylist(id)
-              .then(() => router.push("/playlists"))
+              .then(() => router.push("/musica"))
               .catch((err) => setActionError(err instanceof Error ? err.message : "No se pudo borrar la playlist."));
           }}
           onCancel={() => setConfirmingDelete(false)}
         />
+      )}
+
+      {confirmingRemove && (
+        <RemoveDialog entries={confirmingRemove} onConfirm={() => void confirmRemove()} onCancel={() => setConfirmingRemove(null)} />
       )}
     </div>
   );
@@ -300,8 +374,8 @@ export function PlaylistView({ id }: { id: string }) {
 
 function BackLink() {
   return (
-    <Link href="/playlists" className="mb-5 inline-flex items-center gap-1 text-sm text-white/50 transition hover:text-white">
-      ← Playlists
+    <Link href="/musica" className="mb-5 inline-flex items-center gap-1 text-sm text-white/50 transition hover:text-white">
+      ← Música
     </Link>
   );
 }

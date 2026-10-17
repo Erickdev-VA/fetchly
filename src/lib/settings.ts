@@ -5,17 +5,20 @@ import { dataDir } from "./library/paths";
 /**
  * The user's choices from Ajustes, in %APPDATA%\Fetchly\settings.json.
  * electron/main.cjs reads `libraryDir` from the same file (to know which
- * folder "Mostrar en carpeta" and the Recycle Bin may touch), so keep the
- * field names in sync with readLibraryDirSetting() there.
+ * folder "Mostrar en carpeta" and the Recycle Bin may touch) and
+ * `miniAutoShow` from the same file, so keep those field names in sync with
+ * libraryDir() and miniAutoShow() there.
  */
 export interface Settings {
   /** The library folder, when the user moved it away from Documentos\Fetchly. */
   libraryDir: string | null;
   /** Whether "Compatible con WhatsApp" starts switched on in Descargar. */
   shareableDefault: boolean;
+  /** Whether the mini player shows up by itself when leaving the app with music playing (main.cjs reads it too). */
+  miniAutoShow: boolean;
 }
 
-const DEFAULTS: Settings = { libraryDir: null, shareableDefault: true };
+const DEFAULTS: Settings = { libraryDir: null, shareableDefault: true, miniAutoShow: true };
 
 function settingsPath(): string {
   return path.join(dataDir(), "settings.json");
@@ -30,6 +33,7 @@ function load(): Settings {
     return {
       libraryDir: typeof raw.libraryDir === "string" && path.isAbsolute(raw.libraryDir) ? raw.libraryDir : null,
       shareableDefault: typeof raw.shareableDefault === "boolean" ? raw.shareableDefault : DEFAULTS.shareableDefault,
+      miniAutoShow: typeof raw.miniAutoShow === "boolean" ? raw.miniAutoShow : DEFAULTS.miniAutoShow,
     };
   } catch {
     return { ...DEFAULTS };

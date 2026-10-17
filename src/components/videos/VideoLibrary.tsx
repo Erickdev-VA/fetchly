@@ -1,27 +1,33 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useLibrary } from "@/hooks/useLibrary";
 import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
 import { removeFromLibrary } from "@/lib/library/actions";
 import type { LibraryEntry } from "@/lib/library/types";
+import { toVideoTrack } from "@/lib/player/types";
 import { ErrorBanner } from "../ErrorBanner";
 import { PlatformBadge } from "../PlatformBadge";
 import { ConfirmDialog } from "../library/ConfirmDialog";
 import { ItemMenu, type MenuAction } from "../library/ItemMenu";
 import { LibraryThumb } from "../library/LibraryThumb";
-import { PageHeader } from "../shell/PageHeader";
+import { PAGE_CLASS, PageHeader } from "../shell/PageHeader";
 import { EmptyState } from "../shell/EmptyState";
+import { usePlayer } from "../player/PlayerProvider";
 
-/** The Videos page: a grid of thumbnails; a click opens the video inside the app. */
+/**
+ * The Videos page: a grid of thumbnails. A click plays the video over the
+ * whole window, with the playback bar as its controls; the queue becomes the
+ * videos on the page, so "Siguiente" goes on to the next one.
+ */
 export function VideoLibrary() {
   const { items, error: loadError, reload } = useLibrary("video");
   const [menu, setMenu] = useState<{ entry: LibraryEntry; x: number; y: number } | null>(null);
   const [confirming, setConfirming] = useState<LibraryEntry | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const bridge = desktop();
+  const player = usePlayer();
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const menuActions = (entry: LibraryEntry): MenuAction[] =>
@@ -48,8 +54,14 @@ export function VideoLibrary() {
 
   const count = items?.length ?? 0;
 
+  const play = (entry: LibraryEntry) => {
+    const playable = (items ?? []).filter((e) => !e.missing);
+    const start = playable.findIndex((e) => e.id === entry.id);
+    if (start >= 0) player.actions.playVideos(playable.map(toVideoTrack), start);
+  };
+
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-8">
+    <div className={PAGE_CLASS}>
       <PageHeader title="Videos" subtitle={items && count > 0 ? `${count} video${count === 1 ? "" : "s"}` : undefined} />
 
       {loadError && !items && <ErrorBanner message={loadError} />}
@@ -74,11 +86,11 @@ export function VideoLibrary() {
               }}
               className={`group relative ${entry.missing ? "opacity-50" : ""}`}
             >
-              <Link
-                href={`/videos/${entry.id}`}
-                aria-disabled={entry.missing}
-                onClick={(e) => entry.missing && e.preventDefault()}
-                className="block rounded-2xl p-2 outline-none transition hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
+              <button
+                type="button"
+                disabled={entry.missing}
+                onClick={() => play(entry)}
+                className="block w-full rounded-2xl p-2 text-left outline-none transition hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
               >
                 <div className="relative">
                   <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="video" className="aspect-video w-full rounded-xl" />
@@ -101,7 +113,7 @@ export function VideoLibrary() {
                     </>
                   )}
                 </div>
-              </Link>
+              </button>
               {bridge && (
                 <button
                   type="button"

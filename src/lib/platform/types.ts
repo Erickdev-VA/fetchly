@@ -1,4 +1,6 @@
-export type Platform = "youtube" | "tiktok" | "instagram" | "twitter";
+import type { Category } from "../library/types";
+
+export type Platform ="youtube" | "tiktok" | "instagram" | "twitter";
 
 export type DownloadMode = "auto" | "audio" | "mute";
 
@@ -40,6 +42,8 @@ export interface PlaylistInfo {
   focusEntryId: string | null;
   /** True when the playlist has more videos than we list. */
   truncated: boolean;
+  /** Entries already in the library, by entry id: the categories they're saved in. */
+  inLibrary: Record<string, Category[]>;
 }
 
 export type AnalyzeResult = MediaInfo | PlaylistInfo;

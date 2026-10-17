@@ -18,15 +18,13 @@ interface FetchlyBridge {
     onCommand(listener: (command: unknown) => void): () => void;
   };
   mini: {
-    /** From the main window: opens the mini player, or brings it forward. */
+    /** From the main window: switches to the mini player (minimizes Fetchly and shows it). */
     open(): void;
     // The rest only work from the mini player's own window.
-    getState(): Promise<{ player: PlayerSnapshot | null; pinned: boolean } | null>;
+    getState(): Promise<{ player: PlayerSnapshot | null } | null>;
     /** What's playing (null once the main window is gone); returns the unsubscribe function. */
     onState(listener: (state: PlayerSnapshot | null) => void): () => void;
     command(command: PlayerCommand): void;
-    /** Resolves to the pin state now in effect. */
-    setPinned(pinned: boolean): Promise<boolean>;
     close(): void;
     showApp(): void;
   };

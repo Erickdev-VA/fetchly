@@ -5,16 +5,22 @@ import { usePathname } from "next/navigation";
 import { Logo } from "../Logo";
 import { NavIcon, type NavIconName } from "./NavIcon";
 
-const SECTIONS: { href: string; label: string; icon: NavIconName }[] = [
+// Playlists live at the top of Música (the user merged the two sections),
+// so a playlist's page counts as being in Música.
+const SECTIONS: { href: string; label: string; icon: NavIconName; also?: string }[] = [
   { href: "/", label: "Descargar", icon: "download" },
-  { href: "/musica", label: "Música", icon: "music" },
+  { href: "/musica", label: "Música", icon: "music", also: "/playlists" },
   { href: "/videos", label: "Videos", icon: "video" },
-  { href: "/playlists", label: "Playlists", icon: "playlist" },
   { href: "/ajustes", label: "Ajustes", icon: "settings" },
 ];
 
-function isCurrent(pathname: string, href: string): boolean {
-  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+function isUnder(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function isCurrent(pathname: string, section: (typeof SECTIONS)[number]): boolean {
+  if (section.href === "/") return pathname === "/";
+  return isUnder(pathname, section.href) || (section.also !== undefined && isUnder(pathname, section.also));
 }
 
 /**
@@ -29,7 +35,7 @@ export function Sidebar() {
         <Logo compact />
       </div>
       {SECTIONS.map((s) => {
-        const current = isCurrent(pathname, s.href);
+        const current = isCurrent(pathname, s);
         return (
           <Link
             key={s.href}

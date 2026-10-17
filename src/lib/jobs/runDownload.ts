@@ -17,6 +17,19 @@ const MAX_FILESIZE = process.env.MAX_DOWNLOAD_FILESIZE ?? "2G";
 /** An error whose message is safe and meant to be shown to the user. */
 export class DownloadError extends Error {}
 
+/**
+ * YouTube refused because too many downloads came in (a 429, or its
+ * "confirm you're not a bot" check). Retrying right away only makes it
+ * worse; it clears up after a while.
+ */
+export class BlockedError extends DownloadError {
+  constructor() {
+    super("YouTube está frenando las descargas. Espera unos minutos e inténtalo de nuevo.");
+  }
+}
+
+const BLOCKED_RE = /not a bot|HTTP Error 429|Too Many Requests/i;
+
 export interface RunDownloadOptions {
   url: string;
   mode: DownloadMode;
@@ -124,6 +137,7 @@ function runYtDlp(args: string[], opts: RunDownloadOptions, maxPercent: number, 
       if (timedOut) return reject(new DownloadError("La descarga tardó demasiado y se canceló."));
       if (code !== 0) {
         logger.error("yt-dlp download failed", { code, stderrTail });
+        if (BLOCKED_RE.test(stderrTail)) return reject(new BlockedError());
         return reject(new DownloadError(classifyDownloadError(stderrTail)));
       }
       resolve();

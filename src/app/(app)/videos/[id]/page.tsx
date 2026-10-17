@@ -1,6 +1,6 @@
-import { VideoPlayerView } from "@/components/videos/VideoPlayerView";
+import { OpenVideo } from "@/components/videos/OpenVideo";
 
 export default async function VideoPage(props: PageProps<"/videos/[id]">) {
   const { id } = await props.params;
-  return <VideoPlayerView key={id} id={id} />;
+  return <OpenVideo key={id} id={id} />;
 }

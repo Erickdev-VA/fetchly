@@ -4,7 +4,7 @@ import { mkdir, rm } from "node:fs/promises";
 import type { ChildProcess } from "node:child_process";
 import { killProcessTree } from "../ytdlp/process";
 import { logger } from "../logger";
-import { runDownload, DownloadError } from "./runDownload";
+import { runDownload, BlockedError, DownloadError } from "./runDownload";
 import { acquireDownloadSlot } from "./capacity";
 import { TMP_ROOT, SAVE_FAILED_MESSAGE, initTempRoot, cleanupJobFiles } from "./downloadJobs";
 import { addDownloadToLibrary } from "../library/store";
@@ -17,6 +17,16 @@ const BATCH_CONCURRENCY = Number(process.env.BATCH_CONCURRENCY ?? 2);
 const FINISHED_TTL_MS = 60 * 60 * 1000;
 const ITEM_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 3000;
+/**
+ * A short, uneven pause after each video. Hundreds of back-to-back requests
+ * are what gets YouTube to start refusing; a few seconds between them keeps
+ * a long playlist going far longer.
+ */
+const ITEM_GAP_MIN_MS = 1500;
+const ITEM_GAP_MAX_MS = 4000;
+/** When YouTube starts refusing, wait this long (times how often it happened, up to the max) before going on. */
+const BLOCK_PAUSE_MS = 10 * 60 * 1000;
+const BLOCK_PAUSE_MAX_MS = 30 * 60 * 1000;
 
 export type BatchItemStatus = "queued" | "downloading" | "converting" | "completed" | "error" | "cancelled";
 
@@ -49,6 +59,15 @@ export interface BatchJob {
   cancelled: boolean;
   createdAt: number;
   finishedAt?: number;
+  /** Videos not started yet, in playlist order. */
+  queue: BatchItem[];
+  /** Workers currently pulling from `queue`. */
+  workers: number;
+  /** Set while paused because YouTube refused: when the batch goes on by itself. */
+  pausedUntil?: number;
+  /** How many times YouTube refused during this batch (each pause is longer). */
+  blockCount: number;
+  resumeTimer?: NodeJS.Timeout;
 }
 
 interface BatchJobsGlobal {
@@ -90,7 +109,8 @@ export function getBatch(id: string): BatchJob | null {
   return batches.get(id) ?? null;
 }
 
-async function runItem(batch: BatchJob, item: BatchItem): Promise<void> {
+/** Resolves "requeue" when the video didn't run because the batch got paused, so it goes back in line. */
+async function runItem(batch: BatchJob, item: BatchItem): Promise<"requeue" | void> {
   const itemDir = path.join(batch.tempDir, String(item.index));
   // Start from an empty dir so a retry never picks up a failed attempt's leftovers.
   await rm(itemDir, { recursive: true, force: true });
@@ -106,6 +126,8 @@ async function runItem(batch: BatchJob, item: BatchItem): Promise<void> {
       item.status = "cancelled";
       return;
     }
+    // Paused while this one waited for a download slot.
+    if (batch.pausedUntil) return "requeue";
     item.status = "downloading";
     filePath = await runDownload({
       url: item.url,
@@ -129,6 +151,11 @@ async function runItem(batch: BatchJob, item: BatchItem): Promise<void> {
   } catch (err) {
     if (batch.cancelled) {
       item.status = "cancelled";
+    } else if (err instanceof BlockedError) {
+      item.status = "queued";
+      item.percent = 0;
+      pauseBatch(batch);
+      return "requeue";
     } else {
       item.status = "error";
       item.errorMessage = err instanceof DownloadError ? err.message : "La descarga falló.";
@@ -163,33 +190,88 @@ async function runItem(batch: BatchJob, item: BatchItem): Promise<void> {
   }
 }
 
-async function runBatch(batch: BatchJob): Promise<void> {
-  const queue = [...batch.items];
-  const worker = async () => {
-    for (let item = queue.shift(); item; item = queue.shift()) {
-      if (batch.cancelled) {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Puts a video back in line at its playlist position. */
+function requeue(batch: BatchJob, item: BatchItem): void {
+  const at = batch.queue.findIndex((other) => other.index > item.index);
+  batch.queue.splice(at === -1 ? batch.queue.length : at, 0, item);
+}
+
+/** YouTube is refusing: stop taking new videos and go on by itself after a while. */
+function pauseBatch(batch: BatchJob): void {
+  if (batch.pausedUntil) return; // the other worker hit the same wall
+  batch.blockCount++;
+  const wait = Math.min(BLOCK_PAUSE_MS * batch.blockCount, BLOCK_PAUSE_MAX_MS);
+  batch.pausedUntil = Date.now() + wait;
+  batch.resumeTimer = setTimeout(() => resumeBatch(batch.id), wait);
+  batch.resumeTimer.unref();
+  logger.warn("youtube is refusing downloads, pausing the batch", { batch: batch.id, minutes: wait / 60_000 });
+}
+
+async function work(batch: BatchJob): Promise<void> {
+  while (!batch.pausedUntil) {
+    const item = batch.queue.shift();
+    if (!item) return;
+    if (batch.cancelled) {
+      item.status = "cancelled";
+      continue;
+    }
+    // YouTube occasionally rejects a download (a one-off 403) that works
+    // fine moments later, so give each failed video one more try.
+    for (let attempt = 1; attempt <= ITEM_ATTEMPTS; attempt++) {
+      if (attempt > 1 && batch.cancelled) {
         item.status = "cancelled";
-        continue;
+        break;
       }
-      // YouTube occasionally rejects a download (a one-off 403) that works
-      // fine moments later, so give each failed video one more try.
-      for (let attempt = 1; attempt <= ITEM_ATTEMPTS; attempt++) {
-        if (attempt > 1 && batch.cancelled) {
-          item.status = "cancelled";
-          break;
-        }
-        await runItem(batch, item);
-        if (item.status !== "error" || batch.cancelled || item.errorMessage === SAVE_FAILED_MESSAGE) break;
-        if (attempt < ITEM_ATTEMPTS) {
-          item.status = "queued"; // don't flash "Falló" in the UI before the retry
-          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-        }
+      if ((await runItem(batch, item)) === "requeue") {
+        requeue(batch, item);
+        break;
+      }
+      if (item.status !== "error" || batch.cancelled || item.errorMessage === SAVE_FAILED_MESSAGE) break;
+      if (attempt < ITEM_ATTEMPTS) {
+        item.status = "queued"; // don't flash "Falló" in the UI before the retry
+        await sleep(RETRY_DELAY_MS);
       }
     }
-  };
-  await Promise.all(Array.from({ length: Math.max(1, BATCH_CONCURRENCY) }, worker));
+    if (batch.queue.length > 0 && !batch.cancelled && !batch.pausedUntil) {
+      await sleep(ITEM_GAP_MIN_MS + Math.random() * (ITEM_GAP_MAX_MS - ITEM_GAP_MIN_MS));
+    }
+  }
+}
+
+/** Called when the last worker stops: the batch is over unless it's only paused. */
+async function settle(batch: BatchJob): Promise<void> {
+  if (batch.finishedAt !== undefined) return;
+  if (batch.pausedUntil && !batch.cancelled && batch.queue.length > 0) return;
+  clearTimeout(batch.resumeTimer);
+  batch.pausedUntil = undefined;
   batch.finishedAt = Date.now();
   await cleanupJobFiles(batch);
+}
+
+/** Brings the batch up to its number of parallel downloads. */
+function startWorkers(batch: BatchJob): void {
+  const missing = Math.max(1, BATCH_CONCURRENCY) - batch.workers;
+  for (let i = 0; i < missing; i++) {
+    batch.workers++;
+    void work(batch)
+      .catch((err) => logger.error("batch worker failed", { batch: batch.id, err: String(err) }))
+      .finally(() => {
+        batch.workers--;
+        if (batch.workers === 0) void settle(batch);
+      });
+  }
+}
+
+/** Goes on with a paused batch now instead of waiting out the pause. */
+export function resumeBatch(id: string): void {
+  const batch = batches.get(id);
+  if (!batch || !isBatchRunning(batch) || batch.cancelled || !batch.pausedUntil) return;
+  clearTimeout(batch.resumeTimer);
+  batch.resumeTimer = undefined;
+  batch.pausedUntil = undefined;
+  startWorkers(batch);
 }
 
 export async function startBatchJob(opts: {
@@ -214,6 +296,9 @@ export async function startBatchJob(opts: {
   const tempDir = path.join(TMP_ROOT, `batch-${id}`);
   await mkdir(tempDir, { recursive: true });
 
+  const items: BatchItem[] = opts.entries
+    .sort((a, b) => a.index - b.index)
+    .map((e) => ({ ...e, status: "queued" as const, percent: 0 }));
   const batch: BatchJob = {
     id,
     title: opts.title,
@@ -221,15 +306,16 @@ export async function startBatchJob(opts: {
     mode: opts.mode,
     height: opts.height,
     shareable: opts.shareable,
-    items: opts.entries
-      .sort((a, b) => a.index - b.index)
-      .map((e) => ({ ...e, status: "queued" as const, percent: 0 })),
+    items,
     tempDir,
     cancelled: false,
     createdAt: Date.now(),
+    queue: [...items],
+    workers: 0,
+    blockCount: 0,
   };
   batches.set(id, batch);
-  void runBatch(batch);
+  startWorkers(batch);
   return id;
 }
 
@@ -237,10 +323,13 @@ export function cancelBatch(id: string): void {
   const batch = batches.get(id);
   if (!batch || !isBatchRunning(batch)) return;
   batch.cancelled = true;
+  batch.queue.length = 0;
   for (const item of batch.items) {
     if (item.status === "queued") item.status = "cancelled";
     killProcessTree(item.child);
   }
+  // A paused batch has no worker left to wrap it up.
+  if (batch.workers === 0) void settle(batch);
 }
 
 /** Forgets a finished batch. Its files are already in the library. */

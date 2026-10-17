@@ -1,17 +1,29 @@
 import type { LibraryEntry } from "../library/types";
 
-/** What the player needs to know about a song. */
+/** What the player needs to know about a song or a video. */
 export interface Track {
   id: string;
+  /** A video also shows its picture, full window (see VideoStage). */
+  kind: "music" | "video";
   title: string;
   artist: string | null;
   durationSeconds: number | null;
   hasThumbnail: boolean;
 }
 
+/** A song. One argument only, so it can go straight into map(). */
 export function toTrack(entry: LibraryEntry): Track {
+  return trackOf(entry, "music");
+}
+
+export function toVideoTrack(entry: LibraryEntry): Track {
+  return trackOf(entry, "video");
+}
+
+function trackOf(entry: LibraryEntry, kind: Track["kind"]): Track {
   return {
     id: entry.id,
+    kind,
     title: entry.title,
     artist: entry.artist,
     durationSeconds: entry.durationSeconds,
@@ -37,7 +49,8 @@ export type PlayerCommand =
   | { type: "previous" }
   | { type: "seek"; seconds: number }
   | { type: "volume"; volume: number }
-  | { type: "toggleMute" };
+  | { type: "toggleMute" }
+  | { type: "toggleShuffle" };
 
 /**
  * What the page tells Electron after every change, so the taskbar, tray
@@ -64,5 +77,5 @@ export function isPlayerCommand(value: unknown): value is PlayerCommand {
   const { type, seconds, volume } = value as { type?: unknown; seconds?: unknown; volume?: unknown };
   if (type === "seek") return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0;
   if (type === "volume") return typeof volume === "number" && volume >= 0 && volume <= 1;
-  return type === "toggle" || type === "next" || type === "previous" || type === "toggleMute";
+  return type === "toggle" || type === "next" || type === "previous" || type === "toggleMute" || type === "toggleShuffle";
 }

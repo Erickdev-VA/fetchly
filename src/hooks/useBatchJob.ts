@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startBatch, getBatchProgress, cancelBatch, discardBatch, ApiError, type BatchProgress } from "@/lib/api";
+import {
+  startBatch,
+  getBatchProgress,
+  cancelBatch,
+  resumeBatch,
+  discardBatch,
+  ApiError,
+  type BatchProgress,
+} from "@/lib/api";
 import type { DownloadMode } from "@/lib/platform/types";
 
 export type BatchState =
@@ -77,5 +85,9 @@ export function useBatchJob() {
     if (batchIdRef.current) void cancelBatch(batchIdRef.current);
   }, []);
 
-  return { state, start, cancel, reset };
+  const resume = useCallback(() => {
+    if (batchIdRef.current) void resumeBatch(batchIdRef.current);
+  }, []);
+
+  return { state, start, cancel, resume, reset };
 }

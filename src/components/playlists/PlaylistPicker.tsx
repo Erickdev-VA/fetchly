@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { addToPlaylist, createPlaylist } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
+import { songCount } from "@/lib/library/actions";
 import { usePlaylists } from "@/hooks/useLibrary";
 import { PlaylistMosaic } from "./PlaylistMosaic";
 import { NameDialog } from "./NameDialog";
@@ -12,9 +13,20 @@ interface Song {
   title: string;
 }
 
+interface MoveFrom {
+  /** The playlist the songs leave; it isn't offered as a destination. */
+  playlistId: string;
+  /** Called once they're in the other playlist, to take them out of this one. */
+  onMoved: () => void | Promise<void>;
+}
+
 interface PickerApi {
-  /** Opens "Añadir a playlist" for these songs. */
-  addToPlaylist(songs: Song[]): void;
+  /**
+   * Opens "Añadir a playlist" for these songs. With `moveFrom` it's "Mover a
+   * playlist": once they're added (or were already there), `onMoved` takes
+   * them out of the playlist they came from. If adding fails, they stay.
+   */
+  addToPlaylist(songs: Song[], moveFrom?: MoveFrom): void;
   /** A short message at the bottom of the window. */
   notify(message: string): void;
 }
@@ -30,7 +42,7 @@ export function usePlaylistPicker(): PickerApi {
 const TOAST_MS = 3000;
 
 function describe(songs: Song[]): string {
-  return songs.length === 1 ? `«${songs[0].title}»` : `${songs.length} canciones`;
+  return songs.length === 1 ? `«${songs[0].title}»` : songCount(songs.length);
 }
 
 /**
@@ -40,6 +52,7 @@ function describe(songs: Song[]): string {
  */
 export function PlaylistPickerProvider({ children }: { children: React.ReactNode }) {
   const [songs, setSongs] = useState<Song[] | null>(null);
+  const [moveFrom, setMoveFrom] = useState<MoveFrom | null>(null);
   const [naming, setNaming] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -56,21 +69,44 @@ export function PlaylistPickerProvider({ children }: { children: React.ReactNode
     [],
   );
 
-  const api = useMemo<PickerApi>(() => ({ addToPlaylist: (next) => setSongs(next.length ? next : null), notify }), [notify]);
+  const api = useMemo<PickerApi>(
+    () => ({
+      addToPlaylist: (next, from) => {
+        setSongs(next.length ? next : null);
+        setMoveFrom(from ?? null);
+      },
+      notify,
+    }),
+    [notify],
+  );
 
   const close = () => {
     setSongs(null);
+    setMoveFrom(null);
     setNaming(false);
+  };
+
+  /** After the songs are in `name`: finish a move, then say how it went. */
+  const finish = async (name: string, added: number | "created") => {
+    if (!songs) return;
+    if (moveFrom) {
+      try {
+        await moveFrom.onMoved();
+        notify(`${describe(songs)} ${songs.length === 1 ? "movida" : "movidas"} a «${name}»`);
+      } catch (err) {
+        notify(err instanceof Error ? err.message : `Se añadieron a «${name}», pero no se pudieron quitar de esta playlist.`);
+      }
+    } else if (added === "created") notify(`Playlist «${name}» creada con ${describe(songs)}`);
+    else if (added === 0) notify(`${songs.length === 1 ? "Ya estaba" : "Ya estaban"} en «${name}»`);
+    else if (songs.length === 1) notify(`«${songs[0].title}» añadida a «${name}»`);
+    else notify(`${added} canciones añadidas a «${name}»`);
   };
 
   const addTo = async (playlist: { id: string; name: string }) => {
     if (!songs) return;
     close();
     try {
-      const added = await addToPlaylist(playlist.id, songs.map((s) => s.id));
-      if (added === 0) notify(`${songs.length === 1 ? "Ya estaba" : "Ya estaban"} en «${playlist.name}»`);
-      else if (songs.length === 1) notify(`«${songs[0].title}» añadida a «${playlist.name}»`);
-      else notify(`${added} canciones añadidas a «${playlist.name}»`);
+      await finish(playlist.name, await addToPlaylist(playlist.id, songs.map((s) => s.id)));
     } catch (err) {
       notify(err instanceof Error ? err.message : "No se pudo añadir a la playlist.");
     }
@@ -80,15 +116,22 @@ export function PlaylistPickerProvider({ children }: { children: React.ReactNode
     <PickerContext.Provider value={api}>
       {children}
       {songs && !naming && (
-        <PickerDialog songs={songs} onPick={(p) => void addTo(p)} onNew={() => setNaming(true)} onCancel={close} />
+        <PickerDialog
+          songs={songs}
+          moving={moveFrom !== null}
+          exclude={moveFrom?.playlistId ?? null}
+          onPick={(p) => void addTo(p)}
+          onNew={() => setNaming(true)}
+          onCancel={close}
+        />
       )}
       {songs && naming && (
         <NameDialog
           title="Nueva playlist"
-          submitLabel="Crear y añadir"
+          submitLabel={moveFrom ? "Crear y mover" : "Crear y añadir"}
           onSubmit={async (name) => {
             await createPlaylist(name, songs.map((s) => s.id));
-            notify(`Playlist «${name}» creada con ${describe(songs)}`);
+            await finish(name, "created");
             close();
           }}
           onCancel={close}
@@ -108,11 +151,16 @@ export function PlaylistPickerProvider({ children }: { children: React.ReactNode
 
 function PickerDialog({
   songs,
+  moving,
+  exclude,
   onPick,
   onNew,
   onCancel,
 }: {
   songs: Song[];
+  moving: boolean;
+  /** A playlist not to list (the one the songs are moving out of). */
+  exclude: string | null;
   onPick: (playlist: { id: string; name: string }) => void;
   onNew: () => void;
   onCancel: () => void;
@@ -133,7 +181,7 @@ function PickerDialog({
       }}
       className="m-auto w-[min(420px,calc(100vw-32px))] rounded-2xl border border-white/10 bg-[#17171b] p-5 text-white backdrop:bg-black/60"
     >
-      <h2 className="text-[15px] font-semibold">Añadir a playlist</h2>
+      <h2 className="text-[15px] font-semibold">{moving ? "Mover a playlist" : "Añadir a playlist"}</h2>
       <p className="mt-1 truncate text-sm text-white/50">{describe(songs)}</p>
 
       <div className="mt-4 max-h-[min(360px,50vh)] overflow-y-auto">
@@ -148,7 +196,7 @@ function PickerDialog({
           Nueva playlist
         </button>
         {error && !playlists && <p className="px-2 py-3 text-xs text-red-300">{error}</p>}
-        {playlists?.map((p) => (
+        {playlists?.filter((p) => p.id !== exclude).map((p) => (
           <button
             key={p.id}
             type="button"

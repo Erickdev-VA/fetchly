@@ -1,7 +1,7 @@
 // Electron main process. Shows a window right away with a local loading
 // screen, boots the Next.js server and switches the window to it as soon as
-// the server accepts connections. Closing the window only hides it: the app
-// keeps running from the tray (icon next to the clock) until "Salir".
+// the server accepts connections. Closing the window quits the app; while it
+// runs, the tray icon (next to the clock) has playback controls and "Salir".
 //
 // - Installed app / `npm run electron:preview`: the standalone server built
 //   by scripts/build-desktop.mjs, run in a utility process on Electron's
@@ -21,7 +21,9 @@ const { mediaIcons } = require("./media-icons.cjs");
 // Fetchly without touching the user's songs. Nothing sets it for users.
 const testProfile = process.env.FETCHLY_TEST_PROFILE === "1";
 const profileName = testProfile ? "Fetchly-test" : "Fetchly";
-app.setName("Fetchly");
+// Shown as "Pista"; the data folders keep the old name "Fetchly" (above),
+// so the library survives the rename.
+app.setName("Pista");
 app.setPath("userData", path.join(app.getPath("appData"), profileName));
 
 // Chromium pauses muted media in a window that's hidden or covered by other
@@ -99,7 +101,7 @@ function spawnServer() {
     });
   }
   return utilityProcess.fork(path.join(__dirname, "server-entry.cjs"), [], {
-    serviceName: "Fetchly Server",
+    serviceName: "Pista Server",
     stdio: "pipe",
     env: {
       ...serverEnv(),
@@ -133,7 +135,7 @@ function startServer() {
         settled = true;
         reject(new Error(`El servidor se cerró con el código ${code}.\n\n${recentOutput.trim()}`));
       } else if (!quitting) {
-        dialog.showErrorBox("Fetchly", `El servidor de la app se detuvo inesperadamente.\n\n${recentOutput.trim()}`);
+        dialog.showErrorBox("Pista", `El servidor de la app se detuvo inesperadamente.\n\n${recentOutput.trim()}`);
         quitApp();
       }
     });
@@ -211,7 +213,7 @@ function createWindow() {
     minWidth: 720,
     minHeight: 560,
     show: false,
-    title: "Fetchly",
+    title: "Pista",
     icon: path.join(__dirname, "assets", "icon.png"),
     backgroundColor: "#0a0a0c",
     autoHideMenuBar: true,
@@ -227,19 +229,10 @@ function createWindow() {
   });
   mainWindow.once("ready-to-show", () => mainWindow.show());
 
-  // The X hides to the tray; only "Salir" really quits.
-  mainWindow.on("close", (event) => {
-    if (quitting) return;
-    event.preventDefault();
-    mainWindow.hide();
-    if (!readState().trayHintShown && tray) {
-      tray.displayBalloon({
-        iconType: "info",
-        title: "Fetchly sigue abierto",
-        content: "Está junto al reloj. Para cerrarlo del todo: clic derecho en el icono → Salir.",
-      });
-      writeState({ trayHintShown: true });
-    }
+  // The X quits the whole app, like "Salir" in the tray: music, mini player,
+  // server and any download in progress. Minimizing is how to keep it going.
+  mainWindow.on("close", () => {
+    if (!quitting) quitApp();
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -250,6 +243,7 @@ function createWindow() {
   });
   // Windows drops the thumbnail buttons whenever the window is hidden.
   mainWindow.on("show", updateThumbar);
+  watchMainWindowForMini(mainWindow);
 
   // Links to other sites open in the real browser, not inside the app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -340,7 +334,7 @@ function updateTrayMenu() {
   // "&" marks a keyboard shortcut in Windows menus; "&&" shows a real one.
   const menuText = (text) => text.replace(/&/g, "&&");
   const nowPlaying = track ? `${track.title}${track.artist ? ` — ${track.artist}` : ""}` : null;
-  tray.setToolTip(nowPlaying ? `Fetchly · ${nowPlaying}`.slice(0, 127) : "Fetchly");
+  tray.setToolTip(nowPlaying ? `Pista · ${nowPlaying}`.slice(0, 127) : "Pista");
   tray.setContextMenu(
     Menu.buildFromTemplate([
       ...(nowPlaying ? [{ label: menuText(nowPlaying.slice(0, 60)), enabled: false }] : []),
@@ -352,7 +346,7 @@ function updateTrayMenu() {
       { label: "Siguiente", enabled: Boolean(track && playerState.hasNext), click: () => sendPlayerCommand("next") },
       { label: "Anterior", enabled: Boolean(track && playerState.hasPrevious), click: () => sendPlayerCommand("previous") },
       { type: "separator" },
-      { label: "Mostrar Fetchly", click: showMainWindow },
+      { label: "Mostrar Pista", click: showMainWindow },
       { type: "separator" },
       { label: "Salir", click: quitApp },
     ]),
@@ -363,8 +357,10 @@ ipcMain.on("player:state", (event, value) => {
   if (!fromApp(event) || event.sender !== mainWindow?.webContents) return;
   const next = readSnapshot(value);
   const controlsChanged = controlsKey(next) !== controlsKey(playerState);
+  const started = Boolean(next?.playing && !playerState?.playing);
   playerState = next;
   sendToMini();
+  if (started) playbackStarted();
   if (controlsChanged) {
     updateThumbar();
     updateTrayMenu();
@@ -374,13 +370,43 @@ ipcMain.on("player:state", (event, value) => {
 // --- mini player: a small always-on-top remote control ---------------------
 // It never plays anything itself: it mirrors playerState and sends commands
 // to the main window, which keeps the only <audio>.
+//
+// Like Spotify's, it comes and goes by itself: leaving Fetchly while a song
+// plays (minimizing it or switching to another app)
+// shows it, and coming back to Fetchly hides it. ✕ hides it until the next
+// time you leave. It's hidden rather than closed, so it comes back at once.
 
-const MINI_DEFAULT_SIZE = { width: 400, height: 128 };
-const MINI_MIN_SIZE = { width: 200, height: 72 };
+// Wide enough for every control (🔀 ⏮ ⏯ ⏭, the volume slider) beside the title.
+const MINI_DEFAULT_SIZE = { width: 480, height: 96 };
+const MINI_MIN_SIZE = { width: 240, height: 72 };
 const MINI_MARGIN = 24;
+// The highest level Windows offers: the plain always-on-top one loses its
+// place to the taskbar and to other always-on-top windows.
+const MINI_LEVEL = "screen-saver";
+// After the main window loses focus, wait this long to see where focus went.
+const BLUR_SETTLE_MS = 250;
 
-function miniPinned() {
-  return readState().miniPinned !== false;
+/** Set by ✕ on the mini: stay hidden until the user comes back to Fetchly. */
+let miniDismissed = false;
+/** A native dialog of the main window is open: losing focus to it isn't leaving the app. */
+let dialogOpen = false;
+
+/** Ajustes → "Mostrar el mini reproductor al salir de la app" (on unless switched off). */
+function miniAutoShow() {
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath, "utf8")).miniAutoShow !== false;
+  } catch {
+    return true;
+  }
+}
+
+/** Whether enough of a window there, the top edge included, is on some screen to grab it. */
+function onScreen(bounds) {
+  return screen.getAllDisplays().some(({ workArea: a }) => {
+    const overlapX = Math.min(bounds.x + bounds.width, a.x + a.width) - Math.max(bounds.x, a.x);
+    const topInside = bounds.y >= a.y && bounds.y < a.y + a.height - 32;
+    return topInside && overlapX >= 80;
+  });
 }
 
 /** The saved bounds if they're still on a connected screen, else the bottom-right corner of the main one. */
@@ -390,13 +416,7 @@ function miniBounds() {
     const width = Math.max(MINI_MIN_SIZE.width, Math.round(saved.width));
     const height = Math.max(MINI_MIN_SIZE.height, Math.round(saved.height));
     const bounds = { x: Math.round(saved.x), y: Math.round(saved.y), width, height };
-    // Enough of it, the top edge included, must be on some screen to grab it.
-    const visible = screen.getAllDisplays().some(({ workArea: a }) => {
-      const overlapX = Math.min(bounds.x + width, a.x + a.width) - Math.max(bounds.x, a.x);
-      const topInside = bounds.y >= a.y && bounds.y < a.y + a.height - 32;
-      return topInside && overlapX >= 80;
-    });
-    if (visible) return bounds;
+    if (onScreen(bounds)) return bounds;
   }
   const { workArea } = screen.getPrimaryDisplay();
   const width = Math.min(saved?.width > 0 ? Math.round(saved.width) : MINI_DEFAULT_SIZE.width, workArea.width - MINI_MARGIN * 2);
@@ -413,13 +433,34 @@ function sendToMini() {
   miniWindow?.webContents.send("mini:state", playerState);
 }
 
+/** Windows drops a window from the top band now and then (taskbar clicks, other topmost apps); put it back. */
+function keepMiniOnTop() {
+  if (!miniWindow || miniWindow.isDestroyed() || !miniWindow.isVisible()) return;
+  miniWindow.setAlwaysOnTop(true, MINI_LEVEL);
+  miniWindow.moveTop();
+}
+
+function saveMiniBounds() {
+  if (miniWindow && !miniWindow.isDestroyed()) writeState({ miniBounds: miniWindow.getBounds() });
+}
+
+/**
+ * Shows the mini player without taking focus from whatever the user is
+ * doing now: it appears next to the app they switched to, not in front of
+ * their typing.
+ */
 function openMini() {
   if (miniWindow) {
-    miniWindow.show();
-    miniWindow.focus();
+    if (!miniWindow.isVisible()) {
+      // A hidden window keeps its place. Only move it if that screen is gone
+      // since: setting the same bounds again would grow it a few pixels each
+      // time under display scaling (see below).
+      if (!onScreen(miniWindow.getBounds())) miniWindow.setBounds(miniBounds());
+      miniWindow.showInactive();
+    }
+    keepMiniOnTop();
     return;
   }
-  const pinned = miniPinned();
   const bounds = miniBounds();
   miniWindow = new BrowserWindow({
     ...bounds,
@@ -432,10 +473,10 @@ function openMini() {
     minimizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    alwaysOnTop: pinned,
-    title: "Fetchly · Mini reproductor",
+    alwaysOnTop: true,
+    title: "Pista · Mini reproductor",
     icon: path.join(__dirname, "assets", "icon.png"),
-    backgroundColor: "#121216",
+    backgroundColor: "#121212",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -455,16 +496,18 @@ function openMini() {
       height: bounds.height - (actual.height - bounds.height),
     });
   }
-  // "floating" keeps it above normal windows without covering menus and the like.
-  if (pinned) miniWindow.setAlwaysOnTop(true, "floating");
-  miniWindow.once("ready-to-show", () => miniWindow?.show());
+  miniWindow.setAlwaysOnTop(true, MINI_LEVEL);
+  miniWindow.once("ready-to-show", () => {
+    if (!miniWindow || miniDismissed || mainWindow?.isFocused()) return;
+    miniWindow.showInactive();
+    keepMiniOnTop();
+  });
 
-  const saveBounds = () => {
-    if (miniWindow && !miniWindow.isDestroyed()) writeState({ miniBounds: miniWindow.getBounds() });
-  };
-  miniWindow.on("moved", saveBounds);
-  miniWindow.on("resized", saveBounds);
-  miniWindow.on("close", saveBounds);
+  miniWindow.on("moved", saveMiniBounds);
+  miniWindow.on("resized", saveMiniBounds);
+  miniWindow.on("close", saveMiniBounds);
+  miniWindow.on("show", keepMiniOnTop);
+  miniWindow.on("blur", keepMiniOnTop);
   miniWindow.on("closed", () => {
     miniWindow = null;
   });
@@ -476,6 +519,52 @@ function openMini() {
   miniWindow.loadURL(`${APP_ORIGIN}/mini`);
 }
 
+function hideMini() {
+  if (!miniWindow || miniWindow.isDestroyed() || !miniWindow.isVisible()) return;
+  saveMiniBounds();
+  miniWindow.hide();
+}
+
+/** The user left Fetchly: bring up the mini if a song is playing. */
+function leftApp() {
+  if (quitting || miniDismissed || !miniAutoShow() || !playerState?.track || !playerState.playing) return;
+  openMini();
+}
+
+/** Whether focus is now outside Fetchly altogether (another app, the desktop, the taskbar). */
+function focusLeftApp() {
+  if (dialogOpen || !mainWindow || mainWindow.isFocused()) return false;
+  // Our own windows (the mini, DevTools) count as still being in the app.
+  return BrowserWindow.getFocusedWindow() === null;
+}
+
+/** Hooks the main window up to the mini: leaving the app shows it, coming back hides it. */
+function watchMainWindowForMini(win) {
+  win.on("minimize", leftApp);
+  win.on("hide", leftApp);
+  win.on("blur", () => {
+    setTimeout(() => {
+      if (focusLeftApp()) leftApp();
+    }, BLUR_SETTLE_MS);
+  });
+  const cameBack = () => {
+    miniDismissed = false;
+    hideMini();
+  };
+  win.on("focus", cameBack);
+  win.on("restore", cameBack);
+  win.on("show", () => {
+    if (win.isFocused()) cameBack();
+  });
+}
+
+/** A song started while the user is outside Fetchly (a media key, the tray): show the mini too. */
+function playbackStarted() {
+  if (!mainWindow) return;
+  const outside = mainWindow.isMinimized() || !mainWindow.isVisible() || focusLeftApp();
+  if (outside) leftApp();
+}
+
 function fromMini(event) {
   return fromApp(event) && event.sender === miniWindow?.webContents;
 }
@@ -483,19 +572,23 @@ function fromMini(event) {
 /** The commands the mini may send, rebuilt so nothing else rides along. */
 function readMiniCommand(value) {
   if (typeof value !== "object" || value === null) return null;
-  if (["toggle", "next", "previous", "toggleMute"].includes(value.type)) return { type: value.type };
+  if (["toggle", "next", "previous", "toggleMute", "toggleShuffle"].includes(value.type)) return { type: value.type };
   if (value.type === "seek" && Number.isFinite(value.seconds) && value.seconds >= 0) return { type: "seek", seconds: value.seconds };
   if (value.type === "volume" && Number.isFinite(value.volume)) return { type: "volume", volume: Math.min(1, Math.max(0, value.volume)) };
   return null;
 }
 
+// ⧉ in the playback bar: switch to the mini, i.e. step out of the app.
 ipcMain.on("mini:open", (event) => {
-  if (fromApp(event) && event.sender === mainWindow?.webContents) openMini();
+  if (!fromApp(event) || event.sender !== mainWindow?.webContents) return;
+  miniDismissed = false;
+  openMini();
+  mainWindow.minimize();
 });
 
 ipcMain.handle("mini:get-state", (event) => {
   if (!fromMini(event)) return null;
-  return { player: playerState, pinned: miniPinned() };
+  return { player: playerState };
 });
 
 ipcMain.on("mini:command", (event, value) => {
@@ -504,15 +597,11 @@ ipcMain.on("mini:command", (event, value) => {
   if (command) sendPlayerCommand(command);
 });
 
-ipcMain.handle("mini:set-pinned", (event, pinned) => {
-  if (!fromMini(event) || typeof pinned !== "boolean") return miniPinned();
-  writeState({ miniPinned: pinned });
-  miniWindow.setAlwaysOnTop(pinned, "floating");
-  return pinned;
-});
-
+// ✕: hidden until the user comes back to Fetchly and leaves again. The music keeps going.
 ipcMain.on("mini:close", (event) => {
-  if (fromMini(event)) miniWindow.close();
+  if (!fromMini(event)) return;
+  miniDismissed = true;
+  hideMini();
 });
 
 ipcMain.on("mini:show-app", (event) => {
@@ -559,11 +648,20 @@ ipcMain.handle("dialog:choose-folder", async (event, purpose) => {
   if (!fromApp(event) || event.sender !== mainWindow?.webContents) return null;
   const titles = { library: "Elige dónde guardar la biblioteca", import: "Elige la carpeta que quieres importar" };
   if (!Object.hasOwn(titles, purpose)) return null;
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: titles[purpose],
-    properties: ["openDirectory", ...(purpose === "library" ? ["createDirectory"] : [])],
-  });
-  return result.canceled ? null : (result.filePaths[0] ?? null);
+  // The picker takes focus from the main window; that isn't leaving the app.
+  dialogOpen = true;
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: titles[purpose],
+      properties: ["openDirectory", ...(purpose === "library" ? ["createDirectory"] : [])],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  } finally {
+    // Focus returns to the main window right after; let its blur check run first.
+    setTimeout(() => {
+      dialogOpen = false;
+    }, BLUR_SETTLE_MS * 2);
+  }
 });
 
 ipcMain.handle("library:show-item", (event, filePath) => {
@@ -608,13 +706,13 @@ if (!gotLock) {
     } catch (err) {
       if (quitting) return;
       console.error("Failed to start the app server:", err);
-      dialog.showErrorBox("Fetchly no pudo iniciar", String(err?.message ?? err));
+      dialog.showErrorBox("Pista no pudo iniciar", String(err?.message ?? err));
       quitApp();
     }
   });
 
-  // Windows are only destroyed when quitting, so this never ends the app on
-  // its own; "Salir" in the tray does.
+  // Windows are only destroyed when quitting (the X and "Salir" both quit),
+  // so there's nothing left to do here.
   app.on("window-all-closed", () => {});
 
   app.on("before-quit", () => {

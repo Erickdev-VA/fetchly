@@ -11,6 +11,7 @@ import {
   youtubeVideoUrl,
 } from "@/lib/platform/playlist";
 import { saveAnalysis } from "@/lib/jobs/analysisCache";
+import { findOwnedVideos } from "@/lib/library/items";
 import { AppError } from "@/lib/errors";
 import { errorResponse } from "@/lib/http";
 import { logger } from "@/lib/logger";
@@ -57,6 +58,8 @@ async function analyzePlaylist(url: URL, platform: Platform, listId: string): Pr
     entries: playlist.entries,
     focusEntryId: videoId && playlist.entries.some((e) => e.id === videoId) ? videoId : null,
     truncated: isMix || playlist.totalCount > maxEntries,
+    // Entry ids are YouTube video ids.
+    inLibrary: Object.fromEntries(findOwnedVideos(playlist.entries.map((e) => e.id))),
   };
 }
 
