@@ -1,6 +1,15 @@
 import type { DownloadState } from "@/hooks/useDownloadJob";
 
-export function DownloadButton({ state, onClick }: { state: DownloadState; onClick: () => void }) {
+export function DownloadButton({
+  state,
+  onClick,
+  blocked,
+}: {
+  state: DownloadState;
+  onClick: () => void;
+  /** Why it can't start yet (shown instead of "Descargar"). */
+  blocked?: string | null;
+}) {
   const isBusy =
     state.phase === "starting" ||
     state.phase === "queued" ||
@@ -13,7 +22,7 @@ export function DownloadButton({ state, onClick }: { state: DownloadState; onCli
         ? 100
         : 0;
 
-  let text = "Descargar";
+  let text = blocked ?? "Descargar";
   if (state.phase === "starting") text = "Preparando…";
   else if (state.phase === "queued") text = "En espera…";
   else if (state.phase === "processing") text = `Descargando ${Math.round(percent)}%`;
@@ -24,8 +33,10 @@ export function DownloadButton({ state, onClick }: { state: DownloadState; onCli
     <button
       type="button"
       onClick={onClick}
-      disabled={isBusy}
-      className="relative w-full overflow-hidden rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:cursor-default sm:w-auto sm:px-7"
+      disabled={isBusy || Boolean(blocked && state.phase === "idle")}
+      className={`relative w-full overflow-hidden rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:cursor-default sm:w-auto sm:px-7 ${
+        blocked && state.phase === "idle" ? "opacity-40" : ""
+      }`}
     >
       {isBusy && (
         <span

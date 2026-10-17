@@ -8,7 +8,8 @@ import { runDownload, BlockedError, DownloadError } from "./runDownload";
 import { acquireDownloadSlot } from "./capacity";
 import { TMP_ROOT, SAVE_FAILED_MESSAGE, initTempRoot, cleanupJobFiles } from "./downloadJobs";
 import { addDownloadToLibrary } from "../library/store";
-import { categoryForMode, type LibraryItem } from "../library/types";
+import { placeExistingSong } from "../library/playlists";
+import { categoryForMode, type LibraryItem, type SaveTarget } from "../library/types";
 import type { DownloadMode, Platform } from "../platform/types";
 
 /** Videos downloaded in parallel within one batch (on top of the app-wide limit). */
@@ -44,6 +45,8 @@ export interface BatchItem {
   errorMessage?: string;
   /** The library entry the file became, once completed. */
   libraryItem?: LibraryItem;
+  /** Already downloaded as a song: it's saved to the target again instead of downloaded twice. */
+  existing?: LibraryItem;
   child?: ChildProcess;
 }
 
@@ -54,6 +57,8 @@ export interface BatchJob {
   mode: DownloadMode;
   height: number | "best";
   shareable: boolean;
+  /** "Guardar en": a playlist and/or Música. */
+  target: SaveTarget;
   items: BatchItem[];
   tempDir: string;
   cancelled: boolean;
@@ -111,6 +116,20 @@ export function getBatch(id: string): BatchJob | null {
 
 /** Resolves "requeue" when the video didn't run because the batch got paused, so it goes back in line. */
 async function runItem(batch: BatchJob, item: BatchItem): Promise<"requeue" | void> {
+  if (item.existing) {
+    try {
+      placeExistingSong(item.existing.id, batch.target);
+      item.libraryItem = item.existing;
+      item.percent = 100;
+      item.status = "completed";
+    } catch (err) {
+      logger.error("saving an existing song failed", { batch: batch.id, entry: item.entryId, err: String(err) });
+      item.status = "error";
+      item.errorMessage = SAVE_FAILED_MESSAGE;
+    }
+    return;
+  }
+
   const itemDir = path.join(batch.tempDir, String(item.index));
   // Start from an empty dir so a retry never picks up a failed attempt's leftovers.
   await rm(itemDir, { recursive: true, force: true });
@@ -178,7 +197,7 @@ async function runItem(batch: BatchJob, item: BatchItem): Promise<"requeue" | vo
       platform: batch.platform,
       sourceUrl: item.url,
       thumbnailUrl: item.thumbnailUrl,
-    });
+    }, batch.target);
     item.percent = 100;
     item.status = "completed";
   } catch (err) {
@@ -234,7 +253,8 @@ async function work(batch: BatchJob): Promise<void> {
         await sleep(RETRY_DELAY_MS);
       }
     }
-    if (batch.queue.length > 0 && !batch.cancelled && !batch.pausedUntil) {
+    // Nothing was asked of YouTube for a song that was already here.
+    if (!item.existing && batch.queue.length > 0 && !batch.cancelled && !batch.pausedUntil) {
       await sleep(ITEM_GAP_MIN_MS + Math.random() * (ITEM_GAP_MAX_MS - ITEM_GAP_MIN_MS));
     }
   }
@@ -280,6 +300,7 @@ export async function startBatchJob(opts: {
   mode: DownloadMode;
   height: number | "best";
   shareable: boolean;
+  target: SaveTarget;
   entries: {
     entryId: string;
     url: string;
@@ -288,6 +309,7 @@ export async function startBatchJob(opts: {
     thumbnailUrl: string | null;
     durationSeconds: number | null;
     index: number;
+    existing?: LibraryItem;
   }[];
 }): Promise<string> {
   await initTempRoot();
@@ -306,6 +328,7 @@ export async function startBatchJob(opts: {
     mode: opts.mode,
     height: opts.height,
     shareable: opts.shareable,
+    target: opts.target,
     items,
     tempDir,
     cancelled: false,

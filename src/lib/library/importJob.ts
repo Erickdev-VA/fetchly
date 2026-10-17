@@ -134,6 +134,7 @@ async function importFile(job: ImportJob, source: string, seen: Set<string>): Pr
       thumbnailFile,
       createdAt: Date.now(),
       fingerprint,
+      inLibrary: true,
     };
     insertItem(item);
     job.imported[category]++;

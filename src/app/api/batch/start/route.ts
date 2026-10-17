@@ -5,6 +5,8 @@ import { AppError } from "@/lib/errors";
 import { errorResponse } from "@/lib/http";
 import { PLAYLIST_HEIGHTS, type DownloadMode } from "@/lib/platform/types";
 import { MAX_PLAYLIST_ENTRIES } from "@/lib/ytdlp/info";
+import { findSongByVideoId } from "@/lib/library/items";
+import { resolveSaveTarget } from "@/lib/library/saveTarget";
 
 const VALID_MODES: DownloadMode[] = ["auto", "audio", "mute"];
 // Items wait in the batch's own queue, so a whole listed playlist can go at once.
@@ -16,6 +18,8 @@ interface StartBody {
   mode?: unknown;
   height?: unknown;
   shareable?: unknown;
+  /** "Guardar en" (audio only): see resolveSaveTarget. */
+  target?: unknown;
 }
 
 export async function POST(request: Request) {
@@ -43,7 +47,9 @@ export async function POST(request: Request) {
     const entries = ids.map((id) => {
       const entry = typeof id === "string" ? analysis.entries.get(id) : undefined;
       if (!entry) throw new AppError("INVALID_URL", "Uno de los videos seleccionados no pertenece a esta playlist.");
-      return { entryId: id as string, ...entry };
+      // Entries are YouTube videos: a song already downloaded from one is reused.
+      const existing = mode === "audio" ? (findSongByVideoId(id as string) ?? undefined) : undefined;
+      return { entryId: id as string, ...entry, existing };
     });
 
     let height: number | "best" = "best";
@@ -55,16 +61,18 @@ export async function POST(request: Request) {
       height = n;
     }
 
+    const target = resolveSaveTarget(body.target, mode);
     const batchId = await startBatchJob({
       title: analysis.title,
       platform: analysis.platform,
       mode,
       height,
       shareable: body.shareable !== false,
+      target,
       entries,
     });
 
-    return NextResponse.json({ batchId }, { status: 202 });
+    return NextResponse.json({ batchId, playlistId: target.playlistId }, { status: 202 });
   } catch (err) {
     return errorResponse(err);
   }

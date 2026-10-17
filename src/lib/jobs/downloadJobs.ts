@@ -8,7 +8,8 @@ import { logger } from "../logger";
 import { runDownload, DownloadError } from "./runDownload";
 import { acquireDownloadSlot } from "./capacity";
 import { addDownloadToLibrary } from "../library/store";
-import { categoryForMode, type LibraryItem } from "../library/types";
+import { placeExistingSong } from "../library/playlists";
+import { categoryForMode, type LibraryItem, type SaveTarget } from "../library/types";
 import type { DownloadMode, Platform } from "../platform/types";
 
 export const TMP_ROOT = path.join(os.tmpdir(), "media-downloader-jobs");
@@ -66,13 +67,22 @@ export async function startDownloadJob(opts: {
   hasAudioOnlyStream: boolean;
   hasVideoOnlyStream: boolean;
   shareable: boolean;
+  target: SaveTarget;
+  /** The same song, already downloaded: it's saved again instead of downloading it twice. */
+  existing: LibraryItem | null;
 }): Promise<string> {
   await initTempRoot();
 
   const id = randomUUID();
   const tempDir = path.join(TMP_ROOT, id);
-  await mkdir(tempDir, { recursive: true });
 
+  if (opts.existing) {
+    placeExistingSong(opts.existing.id, opts.target);
+    jobs.set(id, { id, status: "completed", percent: 100, converting: false, tempDir, item: opts.existing, finishedAt: Date.now() });
+    return id;
+  }
+
+  await mkdir(tempDir, { recursive: true });
   const job: DownloadJob = { id, status: "queued", percent: 0, converting: false, tempDir };
   jobs.set(id, job);
 
@@ -113,7 +123,7 @@ export async function startDownloadJob(opts: {
         platform: opts.platform,
         sourceUrl: opts.url,
         thumbnailUrl: opts.thumbnailUrl,
-      });
+      }, opts.target);
       job.percent = 100;
       job.status = "completed";
     } catch (err) {

@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 /**
  * A modal yes/no question. Uses the native <dialog>, which brings focus
  * trapping, Escape to cancel and the backdrop for free. Focus starts on
@@ -12,9 +14,12 @@ export function ConfirmDialog({
   tone = "danger",
   onConfirm,
   onCancel,
+  children,
 }: {
   title: string;
   message: string;
+  /** Extra choices shown under the message. */
+  children?: ReactNode;
   confirmLabel: string;
   /** "primary" for a question that isn't about deleting something. */
   tone?: "danger" | "primary";
@@ -38,6 +43,7 @@ export function ConfirmDialog({
     >
       <h2 className="text-[15px] font-semibold">{title}</h2>
       <p className="mt-2 text-sm leading-relaxed text-white/60">{message}</p>
+      {children}
       <div className="mt-5 flex justify-end gap-2">
         <button
           type="button"

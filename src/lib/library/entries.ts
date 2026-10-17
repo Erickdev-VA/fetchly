@@ -14,5 +14,6 @@ export function toEntry(item: LibraryItem): LibraryEntry {
     createdAt: item.createdAt,
     hasThumbnail: item.thumbnailFile !== null,
     missing: !existsSync(item.filePath),
+    inLibrary: item.inLibrary,
   };
 }

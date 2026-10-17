@@ -3,8 +3,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { AppError } from "../errors";
 import { getDb } from "./db";
 import { toEntry } from "./entries";
-import { bumpLibraryRevision, fromRow, type ItemRow } from "./items";
-import { PLAYLIST_NAME_MAX, type PlaylistDetail, type PlaylistSummary } from "./types";
+import { bumpLibraryRevision, fromRow, insertItem, type ItemRow } from "./items";
+import { PLAYLIST_NAME_MAX, type LibraryItem, type PlaylistDetail, type PlaylistSummary, type SaveTarget } from "./types";
 
 interface PlaylistRow {
   id: string;
@@ -88,7 +88,76 @@ export function getPlaylist(id: string): PlaylistDetail | null {
        WHERE p.playlist_id = ? ORDER BY p.position`,
     )
     .all(id) as unknown as ItemRow[];
-  return { ...toSummary(db, row), items: items.map((r) => toEntry(fromRow(r))) };
+  const onlyHere = db
+    .prepare(
+      `SELECT p.item_id FROM playlist_items p JOIN items i ON i.id = p.item_id
+       WHERE p.playlist_id = ? AND i.in_library = 0
+         AND NOT EXISTS (SELECT 1 FROM playlist_items o WHERE o.item_id = p.item_id AND o.playlist_id <> p.playlist_id)`,
+    )
+    .all(id) as unknown as { item_id: string }[];
+  return { ...toSummary(db, row), items: items.map((r) => toEntry(fromRow(r))), onlyHereIds: onlyHere.map((r) => r.item_id) };
+}
+
+/**
+ * Songs kept out of Música that are no longer in any playlist go back to
+ * Música, so no song is left where nothing shows it. Runs after anything
+ * that takes songs out of playlists.
+ */
+function showStrays(db: DatabaseSync): void {
+  db.prepare(
+    `UPDATE items SET in_library = 1
+     WHERE in_library = 0 AND NOT EXISTS (SELECT 1 FROM playlist_items p WHERE p.item_id = items.id)`,
+  ).run();
+}
+
+/**
+ * Records a new download and puts it in its playlist in one step, so the
+ * song is never seen outside a playlist while kept out of Música. If the
+ * playlist was deleted meanwhile, the song goes to Música instead.
+ */
+export function insertDownloadedItem(item: LibraryItem, target: SaveTarget): LibraryItem {
+  const db = getDb();
+  const saved = inTransaction(db, () => {
+    const inPlaylist = target.playlistId !== null && item.category === "music" && playlistExists(db, target.playlistId);
+    const row = { ...item, inLibrary: target.inLibrary || !inPlaylist };
+    insertItem(row);
+    if (inPlaylist) {
+      appendSongs(db, target.playlistId!, [item.id]);
+      touch(db, target.playlistId!);
+    }
+    return row;
+  });
+  bumpLibraryRevision();
+  return saved;
+}
+
+/** A song that was already downloaded, saved again: added to the playlist and/or shown in Música. */
+export function placeExistingSong(itemId: string, target: SaveTarget): void {
+  const db = getDb();
+  inTransaction(db, () => {
+    const inPlaylist = target.playlistId !== null && playlistExists(db, target.playlistId);
+    if (inPlaylist && appendSongs(db, target.playlistId!, [itemId]) > 0) touch(db, target.playlistId!);
+    if (target.inLibrary || !inPlaylist) db.prepare("UPDATE items SET in_library = 1 WHERE id = ?").run(itemId);
+  });
+  bumpLibraryRevision();
+}
+
+/**
+ * Shows songs in Música, or keeps them out of it. Only a song that's in some
+ * playlist can be kept out. Returns how many changed.
+ */
+export function setInLibrary(itemIds: unknown, inLibrary: boolean): number {
+  const db = getDb();
+  const ids = existingSongs(db, itemIds);
+  const update = db.prepare(
+    inLibrary
+      ? "UPDATE items SET in_library = 1 WHERE id = ? AND in_library = 0"
+      : `UPDATE items SET in_library = 0 WHERE id = ? AND in_library = 1
+           AND EXISTS (SELECT 1 FROM playlist_items p WHERE p.item_id = items.id)`,
+  );
+  const changed = inTransaction(db, () => ids.reduce((n, id) => n + Number(update.run(id).changes), 0));
+  if (changed > 0) bumpLibraryRevision();
+  return changed;
 }
 
 /** Of `ids`, the songs (not videos) that exist, in the given order, without repeats. */
@@ -138,9 +207,17 @@ export function renamePlaylist(id: string, name: string): boolean {
   return changes > 0;
 }
 
-/** Deletes the playlist only; its songs stay in the library. */
+/**
+ * Deletes the playlist only; its songs stay in the library (the ones kept
+ * out of Música and in no other playlist go back to Música).
+ */
 export function deletePlaylist(id: string): boolean {
-  const { changes } = getDb().prepare("DELETE FROM playlists WHERE id = ?").run(id);
+  const db = getDb();
+  const changes = inTransaction(db, () => {
+    const { changes } = db.prepare("DELETE FROM playlists WHERE id = ?").run(id);
+    showStrays(db);
+    return changes;
+  });
   if (changes > 0) bumpLibraryRevision();
   return changes > 0;
 }
@@ -181,6 +258,7 @@ export function setPlaylistOrder(id: string, itemIds: unknown): boolean {
     const insert = db.prepare("INSERT INTO playlist_items (playlist_id, item_id, position) VALUES (?, ?, ?)");
     order.forEach((itemId, position) => insert.run(id, itemId, position));
     touch(db, id);
+    showStrays(db);
   });
   bumpLibraryRevision();
   return true;

@@ -27,17 +27,25 @@ export function analyzeUrl(url: string): Promise<AnalyzeResult> {
   }).then((res) => parseJsonOrThrow<AnalyzeResult>(res));
 }
 
+/**
+ * "Guardar en" as sent to the server (audio only): an existing playlist or a
+ * new one by name, and whether the song also shows in Música. Leaving it
+ * out saves to Música.
+ */
+export type SaveTargetRequest = { playlistId: string; inLibrary: boolean } | { newPlaylistName: string; inLibrary: boolean };
+
 export function startDownload(params: {
   analysisId: string;
   mode: DownloadMode;
   height: number | "best";
   shareable: boolean;
-}): Promise<{ jobId: string }> {
+  target?: SaveTargetRequest;
+}): Promise<{ jobId: string; playlistId: string | null }> {
   return fetch("/api/download/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
-  }).then((res) => parseJsonOrThrow<{ jobId: string }>(res));
+  }).then((res) => parseJsonOrThrow<{ jobId: string; playlistId: string | null }>(res));
 }
 
 /** Where a finished download ended up in the library. */
@@ -88,12 +96,13 @@ export function startBatch(params: {
   mode: DownloadMode;
   height: number | "best";
   shareable: boolean;
-}): Promise<{ batchId: string }> {
+  target?: SaveTargetRequest;
+}): Promise<{ batchId: string; playlistId: string | null }> {
   return fetch("/api/batch/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
-  }).then((res) => parseJsonOrThrow<{ batchId: string }>(res));
+  }).then((res) => parseJsonOrThrow<{ batchId: string; playlistId: string | null }>(res));
 }
 
 export function getBatchProgress(batchId: string): Promise<BatchProgress> {
@@ -185,6 +194,14 @@ export async function addToPlaylist(id: string, itemIds: string[]): Promise<numb
     (res) => parseJsonOrThrow<{ added: number }>(res),
   );
   return added;
+}
+
+/** Shows songs in Música, or keeps them only in their playlists. Resolves to how many changed. */
+export async function setInLibrary(itemIds: string[], inLibrary: boolean): Promise<number> {
+  const { changed } = await fetch("/api/library/visibility", jsonInit("POST", { itemIds, inLibrary })).then((res) =>
+    parseJsonOrThrow<{ changed: number }>(res),
+  );
+  return changed;
 }
 
 export interface AppSettings {

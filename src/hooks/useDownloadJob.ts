@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startDownload, getDownloadProgress, ApiError, type SavedItem } from "@/lib/api";
+import { startDownload, getDownloadProgress, ApiError, type SavedItem, type SaveTargetRequest } from "@/lib/api";
 import type { DownloadMode } from "@/lib/platform/types";
 
 export type DownloadState =
@@ -17,9 +17,9 @@ const POLL_INTERVAL_MS = 800;
 
 export function useDownloadJob() {
   const [state, setState] = useState<DownloadState>({ phase: "idle" });
-  // The last file this card saved. Outlives the button's "Completado",
-  // which goes back to "Descargar" after a moment.
-  const [saved, setSaved] = useState<SavedItem | null>(null);
+  // The last file this card saved (and the playlist it went into). Outlives
+  // the button's "Completado", which goes back to "Descargar" after a moment.
+  const [saved, setSaved] = useState<(SavedItem & { playlistId: string | null }) | null>(null);
   const pollRef = useRef<number | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -44,11 +44,17 @@ export function useDownloadJob() {
   );
 
   const start = useCallback(
-    async (params: { analysisId: string; mode: DownloadMode; height: number | "best"; shareable: boolean }) => {
+    async (params: {
+      analysisId: string;
+      mode: DownloadMode;
+      height: number | "best";
+      shareable: boolean;
+      target?: SaveTargetRequest;
+    }) => {
       stopPolling();
       setState({ phase: "starting" });
       try {
-        const { jobId } = await startDownload(params);
+        const { jobId, playlistId } = await startDownload(params);
         setState({ phase: "queued" });
 
         pollRef.current = window.setInterval(async () => {
@@ -57,7 +63,7 @@ export function useDownloadJob() {
             if (progress.status === "completed" && progress.item) {
               stopPolling();
               setState({ phase: "completed", item: progress.item });
-              setSaved(progress.item);
+              setSaved({ ...progress.item, playlistId });
             } else if (progress.status === "error") {
               stopPolling();
               setState({ phase: "error", message: progress.errorMessage ?? "La descarga falló." });

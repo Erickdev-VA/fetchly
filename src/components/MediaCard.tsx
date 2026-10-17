@@ -7,23 +7,45 @@ import { PlatformBadge } from "./PlatformBadge";
 import { QualityChips } from "./QualityChips";
 import { DownloadButton } from "./DownloadButton";
 import { SavedNotice } from "./SavedNotice";
+import { ModeToggle } from "./ModeToggle";
+import {
+  SAVE_TO_LIBRARY_CHOICE,
+  SaveTargetPicker,
+  chooseCreatedPlaylist,
+  saveRequest,
+  usePlaylistOptions,
+  type SaveChoice,
+} from "./SaveTargetPicker";
 import { useDownloadJob } from "@/hooks/useDownloadJob";
 
 export function MediaCard({
   media,
   mode,
+  onModeChange,
   shareable,
 }: {
   media: MediaInfo;
   mode: DownloadMode;
+  onModeChange: (mode: DownloadMode) => void;
   shareable: boolean;
 }) {
   const [quality, setQuality] = useState<number | "best">("best");
+  const [choice, setChoice] = useState<SaveChoice>(SAVE_TO_LIBRARY_CHOICE);
+  const { playlists, reload: reloadPlaylists } = usePlaylistOptions();
+  // The playlist the last download went into, for the "Guardado en…" notice.
+  const [savedPlaylistName, setSavedPlaylistName] = useState<string | null>(null);
   const { state, saved, start, reset } = useDownloadJob();
+  const request = mode === "audio" ? saveRequest(choice, playlists) : { playlistName: null };
 
   useEffect(() => {
     reset(true);
   }, [media.analysisId, mode, reset]);
+
+  const savedPlaylistId = saved?.playlistId ?? null;
+  useEffect(() => {
+    if (!savedPlaylistId) return;
+    void reloadPlaylists().then(() => setChoice((c) => chooseCreatedPlaylist(c, savedPlaylistId)));
+  }, [savedPlaylistId, reloadPlaylists]);
 
   useEffect(() => {
     if (state.phase === "completed") {
@@ -82,6 +104,15 @@ export function MediaCard({
             </div>
           </div>
 
+          <div className="flex flex-col items-start gap-3">
+            <ModeToggle value={mode} onChange={onModeChange} disabled={isBusy} />
+            {mode === "audio" ? (
+              <SaveTargetPicker value={choice} onChange={setChoice} playlists={playlists} suggestedName="" disabled={isBusy} />
+            ) : (
+              <span className="text-xs text-white/40">Se guarda en Videos</span>
+            )}
+          </div>
+
           {showQuality ? (
             <QualityChips qualities={media.qualities} selected={quality} onSelect={setQuality} disabled={isBusy} />
           ) : mode === "audio" ? (
@@ -91,14 +122,18 @@ export function MediaCard({
           <div className="mt-1 flex flex-wrap items-center gap-3">
             <DownloadButton
               state={state}
-              onClick={() =>
-                start({
+              blocked={request ? null : "Escribe el nombre de la playlist"}
+              onClick={() => {
+                if (!request) return;
+                setSavedPlaylistName(request.playlistName);
+                void start({
                   analysisId: media.analysisId,
                   mode,
                   height: showQuality ? quality : "best",
                   shareable,
-                })
-              }
+                  target: request.target,
+                });
+              }}
             />
             {estSize && !isBusy && state.phase !== "completed" && (
               <span className="text-xs text-white/35">~{estSize}</span>
@@ -107,7 +142,12 @@ export function MediaCard({
 
           {state.phase === "error" && <p className="text-xs text-red-300">{state.message}</p>}
           {saved && state.phase !== "error" && (
-            <SavedNotice category={saved.category} filePath={saved.filePath} itemId={saved.id} />
+            <SavedNotice
+              category={saved.category}
+              filePath={saved.filePath}
+              itemId={saved.id}
+              playlist={saved.playlistId ? { id: saved.playlistId, name: savedPlaylistName ?? "la playlist" } : null}
+            />
           )}
         </div>
       </div>

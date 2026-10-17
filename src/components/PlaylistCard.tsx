@@ -1,15 +1,23 @@
 "use client";
 
-import Link from "next/link";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PLAYLIST_HEIGHTS, type DownloadMode, type PlaylistEntry, type PlaylistInfo } from "@/lib/platform/types";
 import { formatDuration } from "@/lib/format";
-import { createPlaylist, type BatchItemStatus } from "@/lib/api";
+import type { BatchItemStatus } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
-import { CATEGORY_LABEL, PLAYLIST_NAME_MAX, categoryForMode, type Category } from "@/lib/library/types";
+import { CATEGORY_LABEL, categoryForMode, type Category } from "@/lib/library/types";
 import { useBatchJob } from "@/hooks/useBatchJob";
 import { PlatformBadge } from "./PlatformBadge";
 import { SavedNotice } from "./SavedNotice";
+import { ModeToggle } from "./ModeToggle";
+import {
+  SAVE_TO_LIBRARY_CHOICE,
+  SaveTargetPicker,
+  chooseCreatedPlaylist,
+  saveRequest,
+  usePlaylistOptions,
+  type SaveChoice,
+} from "./SaveTargetPicker";
 
 const QUALITY_OPTIONS: (number | "best")[] = ["best", ...PLAYLIST_HEIGHTS];
 
@@ -45,21 +53,34 @@ function Checkbox({ checked, indeterminate }: { checked: boolean; indeterminate?
 
 const clockTime = (ms: number) => new Date(ms).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
 
-/** Every entry except the ones already saved in this category. */
-function defaultSelection(entries: PlaylistEntry[], owned: Set<string>): Set<string> {
-  return new Set(entries.flatMap((e) => (owned.has(e.id) ? [] : [e.id])));
+/**
+ * Every entry except the ones already saved in this category. Going into a
+ * playlist, every entry: the ones already saved are added to it without
+ * downloading them again.
+ */
+function defaultSelection(entries: PlaylistEntry[], owned: Set<string>, intoPlaylist = false): Set<string> {
+  return new Set(entries.flatMap((e) => (owned.has(e.id) && !intoPlaylist ? [] : [e.id])));
 }
 
 export function PlaylistCard({
   playlist,
   mode,
+  onModeChange,
   shareable,
 }: {
   playlist: PlaylistInfo;
   mode: DownloadMode;
+  onModeChange: (mode: DownloadMode) => void;
   shareable: boolean;
 }) {
   const category = categoryForMode(mode);
+  const [choice, setChoice] = useState<SaveChoice>(SAVE_TO_LIBRARY_CHOICE);
+  const { playlists, reload: reloadPlaylists } = usePlaylistOptions();
+  // Only songs go into playlists.
+  const intoPlaylist = mode === "audio" && choice.to === "playlist";
+  const request = mode === "audio" ? saveRequest(choice, playlists) : { playlistName: null };
+  // The playlist the running (or last) download goes into, for the "Guardado en…" notice.
+  const [startedPlaylistName, setStartedPlaylistName] = useState<string | null>(null);
   // Videos this card downloaded, so "Elegir otros videos" counts them as owned too.
   const [downloadedHere, setDownloadedHere] = useState<{ category: Category; ids: string[] }[]>([]);
   const owned = useMemo(() => {
@@ -91,13 +112,22 @@ export function PlaylistCard({
   const locked = state.phase === "starting" || state.phase === "running" || state.phase === "done";
   const allSelected = selected.size === playlist.entries.length;
 
-  // Switching Audio/Video changes which videos are already owned, so the
-  // selection starts over for the new category (only while picking).
-  const [selectionCategory, setSelectionCategory] = useState(category);
-  if (!locked && selectionCategory !== category) {
-    setSelectionCategory(category);
-    setSelected(defaultSelection(playlist.entries, owned));
+  // Switching Audio/Video changes which videos are already owned, and
+  // "Guardar en" whether those are picked, so the selection starts over
+  // (only while picking).
+  const selectionKey = `${category}:${intoPlaylist}`;
+  const [selectionFor, setSelectionFor] = useState(selectionKey);
+  if (!locked && selectionFor !== selectionKey) {
+    setSelectionFor(selectionKey);
+    setSelected(defaultSelection(playlist.entries, owned, intoPlaylist));
   }
+
+  // A new playlist was created by this download: point the choice at it.
+  const createdPlaylistId = state.phase === "running" || state.phase === "done" ? state.playlistId : null;
+  useEffect(() => {
+    if (!createdPlaylistId) return;
+    void reloadPlaylists().then(() => setChoice((c) => chooseCreatedPlaylist(c, createdPlaylistId)));
+  }, [createdPlaylistId, reloadPlaylists]);
 
   const toggle = useCallback(
     (id: string) => {
@@ -136,7 +166,7 @@ export function PlaylistCard({
       const ids = progress.items.flatMap((i) => (i.status === "completed" ? [i.entryId] : []));
       const nextOwned = new Set([...owned, ...(progress.category === category ? ids : [])]);
       setDownloadedHere((prev) => [...prev, { category: progress.category, ids }]);
-      setSelected(defaultSelection(playlist.entries, nextOwned));
+      setSelected(defaultSelection(playlist.entries, nextOwned, intoPlaylist));
     }
     reset();
   };
@@ -159,10 +189,26 @@ export function PlaylistCard({
           </span>
           {ownedCount > 0 && (
             <span className="text-emerald-300/70">
-              · {ownedCount} ya {ownedCount === 1 ? "está" : "están"} en {CATEGORY_LABEL[category]}
+              · {ownedCount} ya {ownedCount === 1 ? "la tienes" : "las tienes"}
+              {intoPlaylist && " (se añaden sin descargarlas otra vez)"}
             </span>
           )}
         </div>
+      </div>
+
+      <div className="mt-4 flex flex-col items-start gap-3">
+        <ModeToggle value={mode} onChange={onModeChange} disabled={locked} />
+        {mode === "audio" ? (
+          <SaveTargetPicker
+            value={choice}
+            onChange={setChoice}
+            playlists={playlists}
+            suggestedName={playlist.title}
+            disabled={locked}
+          />
+        ) : (
+          <span className="text-xs text-white/40">Se guarda en Videos</span>
+        )}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
@@ -179,7 +225,7 @@ export function PlaylistCard({
                 · {selected.size} seleccionado{selected.size === 1 ? "" : "s"}
               </span>
             </button>
-            {ownedCount > 0 && !onlyNewSelected && (
+            {ownedCount > 0 && !intoPlaylist && !onlyNewSelected && (
               <button
                 type="button"
                 onClick={() => setSelected(defaultSelection(playlist.entries, owned))}
@@ -268,20 +314,25 @@ export function PlaylistCard({
         {state.phase === "idle" || state.phase === "error" ? (
           <button
             type="button"
-            disabled={selected.size === 0}
-            onClick={() =>
-              start({
+            disabled={selected.size === 0 || !request}
+            onClick={() => {
+              if (!request) return;
+              setStartedPlaylistName(request.playlistName);
+              void start({
                 analysisId: playlist.analysisId,
                 // Keep playlist order regardless of click order.
                 entryIds: playlist.entries.filter((e) => selected.has(e.id)).map((e) => e.id),
                 mode,
                 height: mode === "audio" ? "best" : quality,
                 shareable,
-              })
-            }
+                target: request.target,
+              });
+            }}
             className="w-full rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:cursor-default disabled:opacity-40 sm:w-auto sm:px-7"
           >
-            {selected.size === 0
+            {!request
+              ? "Escribe el nombre de la playlist"
+              : selected.size === 0
               ? ownedCount === playlist.entries.length
                 ? "Ya tienes todos estos videos"
                 : "Selecciona videos para descargar"
@@ -317,7 +368,10 @@ export function PlaylistCard({
             {completed > 0 && (
               <SavedNotice
                 category={progress?.category ?? category}
-                text={`${completed} guardado${completed === 1 ? "" : "s"} en ${CATEGORY_LABEL[progress?.category ?? category]}`}
+                text={`${completed} guardado${completed === 1 ? "" : "s"} en ${
+                  state.playlistId ? `la playlist «${startedPlaylistName ?? ""}»` : CATEGORY_LABEL[progress?.category ?? category]
+                }`}
+                playlist={state.playlistId ? { id: state.playlistId, name: startedPlaylistName ?? "" } : null}
               />
             )}
             <button
@@ -332,14 +386,6 @@ export function PlaylistCard({
         {state.phase === "error" && <p className="w-full text-xs text-red-300">{state.message}</p>}
       </div>
 
-      {state.phase === "done" && progress?.category === "music" && completed > 0 && (
-        <PlaylistOffer
-          key={state.batchId}
-          name={playlist.title}
-          // Batch items keep the playlist order.
-          itemIds={items.flatMap((i) => (i.status === "completed" && i.libraryItemId ? [i.libraryItemId] : []))}
-        />
-      )}
     </div>
   );
 }
@@ -471,57 +517,3 @@ const EntryRow = memo(function EntryRow({
     </li>
   );
 });
-
-/** After a playlist downloads as audio: "¿Crear la playlist «X» con N canciones?" */
-function PlaylistOffer({ name, itemIds }: { name: string; itemIds: string[] }) {
-  const [state, setState] = useState<
-    { step: "asking" } | { step: "creating" } | { step: "created"; id: string } | { step: "dismissed" } | { step: "error"; message: string }
-  >({ step: "asking" });
-
-  if (state.step === "dismissed" || itemIds.length === 0) return null;
-
-  const create = async () => {
-    setState({ step: "creating" });
-    try {
-      // Long titles are cut to the longest name a playlist can have.
-      setState({ step: "created", id: await createPlaylist(name.slice(0, PLAYLIST_NAME_MAX), itemIds) });
-    } catch (err) {
-      setState({ step: "error", message: err instanceof Error ? err.message : "No se pudo crear la playlist." });
-    }
-  };
-
-  return (
-    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-[var(--accent)]/25 bg-[var(--accent)]/[0.07] px-4 py-3 text-sm">
-      {state.step === "created" ? (
-        <>
-          <span className="text-emerald-300/90">✓ Playlist «{name}» creada</span>
-          <Link href={`/playlists/${state.id}`} className="font-medium text-white/75 underline-offset-2 hover:text-white hover:underline">
-            Ver playlist
-          </Link>
-        </>
-      ) : (
-        <>
-          <span className="min-w-0 flex-1 text-white/80">
-            ¿Crear la playlist «{name}» con {itemIds.length} canci{itemIds.length === 1 ? "ón" : "ones"}?
-          </span>
-          <button
-            type="button"
-            disabled={state.step === "creating"}
-            onClick={() => void create()}
-            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition enabled:hover:brightness-110 disabled:opacity-50"
-          >
-            {state.step === "creating" ? "Creando…" : "Crear playlist"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setState({ step: "dismissed" })}
-            className="rounded-lg px-2 py-1.5 text-xs font-medium text-white/55 transition hover:text-white"
-          >
-            No, gracias
-          </button>
-          {state.step === "error" && <p className="w-full text-xs text-red-300">{state.message}</p>}
-        </>
-      )}
-    </div>
-  );
-}

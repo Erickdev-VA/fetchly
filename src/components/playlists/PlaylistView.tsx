@@ -6,7 +6,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useDragReorder } from "@/hooks/useDragReorder";
 import { usePlaylist } from "@/hooks/useLibrary";
 import { useSelection } from "@/hooks/useSelection";
-import { deletePlaylist, fetchPlaylist, updatePlaylist } from "@/lib/api";
+import { deletePlaylist, fetchPlaylist, setInLibrary, updatePlaylist } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
 import { removeFromLibrary, removeManyFromLibrary, songCount } from "@/lib/library/actions";
@@ -40,6 +40,8 @@ export function PlaylistView({ id }: { id: string }) {
   const [menu, setMenu] = useState<{ entry: LibraryEntry; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Deleting the playlist: also delete the songs that are only in it (or send them to Música).
+  const [deleteSongsToo, setDeleteSongsToo] = useState(true);
   /** Songs "Borrar" asked about: their files go to the Recycle Bin. */
   const [confirmingRemove, setConfirmingRemove] = useState<LibraryEntry[] | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -95,12 +97,53 @@ export function PlaylistView({ id }: { id: string }) {
     const neighbor = ids[ids.indexOf(entry.id) + step];
     if (neighbor) void saveOrder(moveIds(ids, [entry.id], neighbor, step === 1));
   };
-  /** Takes songs out of this playlist (they stay in Música). */
+  // Songs kept out of Música that are in no other playlist: taking them out
+  // of this one sends them back to Música, and deleting it asks about them.
+  const onlyHere = new Set(playlist.onlyHereIds);
+  const onlyHereEntries = items.filter((e) => onlyHere.has(e.id));
+
+  /** Takes songs out of this playlist (they stay in Música; songs kept apart go back to it). */
   const removeFromHere = (entries: LibraryEntry[]) => {
     const gone = new Set(entries.map((e) => e.id));
     void saveOrder(ids.filter((itemId) => !gone.has(itemId)));
     selection.clear();
-    picker.notify(entries.length === 1 ? `«${entries[0].title}» se quitó de la playlist` : `${songCount(entries.length)} quitadas de la playlist`);
+    const backToLibrary = entries.filter((e) => onlyHere.has(e.id)).length;
+    picker.notify(
+      (entries.length === 1 ? `«${entries[0].title}» se quitó de la playlist` : `${songCount(entries.length)} quitadas de la playlist`) +
+        (backToLibrary > 0 ? ` (${backToLibrary === entries.length && backToLibrary === 1 ? "pasó" : `${songCount(backToLibrary)} pasaron`} a Mi música)` : ""),
+    );
+  };
+
+  /** "Mostrar en Mi música" / "Sacar de Mi música". */
+  const setShownInLibrary = async (entries: LibraryEntry[], inLibrary: boolean) => {
+    try {
+      const changed = await setInLibrary(
+        entries.map((e) => e.id),
+        inLibrary,
+      );
+      setActionError(null);
+      selection.clear();
+      picker.notify(`${songCount(changed)} ${inLibrary ? "ahora en Mi música" : "solo en playlists"}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "No se pudo cambiar.");
+    } finally {
+      await reload();
+    }
+  };
+
+  const confirmDeletePlaylist = async () => {
+    setConfirmingDelete(false);
+    try {
+      // Songs that would otherwise go back to Música go to the Recycle Bin instead.
+      if (deleteSongsToo && bridge && onlyHereEntries.length > 0) {
+        await removeManyFromLibrary(onlyHereEntries, (entry) => player.actions.forgetTrack(entry.id));
+      }
+      await deletePlaylist(id);
+      router.push("/musica");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "No se pudo borrar la playlist.");
+      await reload();
+    }
   };
   /** "Mover a otra playlist…": the picker adds them there, then they leave this one. */
   const moveToOther = (entries: LibraryEntry[]) => {
@@ -157,6 +200,9 @@ export function PlaylistView({ id }: { id: string }) {
       { label: "Añadir a la cola", disabled: entry.missing, onSelect: () => player.actions.addToQueue([toTrack(entry)]) },
       { label: "Añadir a otra playlist…", onSelect: () => picker.addToPlaylist([entry]) },
       { label: "Mover a otra playlist…", onSelect: () => moveToOther([entry]) },
+      entry.inLibrary
+        ? { label: "Sacar de Mi música", onSelect: () => void setShownInLibrary([entry], false) }
+        : { label: "Mostrar en Mi música", onSelect: () => void setShownInLibrary([entry], true) },
       { label: "Subir", disabled: index <= 0, onSelect: () => move(entry, -1) },
       { label: "Bajar", disabled: index >= ids.length - 1, onSelect: () => move(entry, 1) },
       ...(bridge
@@ -185,6 +231,9 @@ export function PlaylistView({ id }: { id: string }) {
     },
     { label: "Añadir a otra playlist…", onSelect: () => picker.addToPlaylist(selected) },
     { label: "Mover a otra playlist…", onSelect: () => moveToOther(selected) },
+    selected.length > 0 && selected.every((e) => !e.inLibrary)
+      ? { label: "Mostrar en Mi música", onSelect: () => void setShownInLibrary(selected, true) }
+      : { label: "Sacar de Mi música", onSelect: () => void setShownInLibrary(selected, false) },
     { label: "Quitar de esta playlist", onSelect: () => removeFromHere(selected) },
     ...(bridge ? [{ label: "Borrar", danger: true, onSelect: () => setConfirmingRemove(selected) }] : []),
   ];
@@ -225,7 +274,10 @@ export function PlaylistView({ id }: { id: string }) {
             </button>
             <button
               type="button"
-              onClick={() => setConfirmingDelete(true)}
+              onClick={() => {
+                setDeleteSongsToo(true);
+                setConfirmingDelete(true);
+              }}
               className="rounded-full px-3 py-2 text-sm font-medium text-red-300/80 transition hover:bg-red-500/10 hover:text-red-300"
             >
               Borrar
@@ -288,6 +340,14 @@ export function PlaylistView({ id }: { id: string }) {
                     {entry.title}
                   </p>
                   <p className="truncate text-xs text-white/40">
+                    {!entry.inLibrary && (
+                      <span
+                        className="mr-1.5 rounded bg-white/[0.08] px-1 py-px text-[10px] font-medium text-white/55"
+                        title="No aparece en Mi música, solo en sus playlists"
+                      >
+                        Aparte
+                      </span>
+                    )}
                     {entry.missing ? <span className="text-amber-300/90">No encontrado</span> : (entry.artist ?? "—")}
                   </p>
                 </div>
@@ -353,16 +413,44 @@ export function PlaylistView({ id }: { id: string }) {
       {confirmingDelete && (
         <ConfirmDialog
           title="¿Borrar esta playlist?"
-          message={`Se borrará «${playlist.name}». Las canciones siguen en Música.`}
+          message={
+            onlyHereEntries.length === 0
+              ? `Se borrará «${playlist.name}». Las canciones siguen en Música.`
+              : `Se borrará «${playlist.name}». ${
+                  onlyHereEntries.length === 1 ? "1 canción solo está" : `${songCount(onlyHereEntries.length)} solo están`
+                } en esta playlist (no en Mi música). ¿Qué hacemos con ${onlyHereEntries.length === 1 ? "ella" : "ellas"}?`
+          }
           confirmLabel="Borrar playlist"
-          onConfirm={() => {
-            setConfirmingDelete(false);
-            void deletePlaylist(id)
-              .then(() => router.push("/musica"))
-              .catch((err) => setActionError(err instanceof Error ? err.message : "No se pudo borrar la playlist."));
-          }}
+          onConfirm={() => void confirmDeletePlaylist()}
           onCancel={() => setConfirmingDelete(false)}
-        />
+        >
+          {onlyHereEntries.length > 0 && (
+            <div className="mt-3 flex flex-col gap-2 text-sm text-white/80">
+              {bridge && (
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="radio"
+                    name="only-here"
+                    checked={deleteSongsToo}
+                    onChange={() => setDeleteSongsToo(true)}
+                    className="accent-[var(--accent)]"
+                  />
+                  Borrarlas también (van a la Papelera)
+                </label>
+              )}
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  name="only-here"
+                  checked={!deleteSongsToo || !bridge}
+                  onChange={() => setDeleteSongsToo(false)}
+                  className="accent-[var(--accent)]"
+                />
+                Pasarlas a Mi música
+              </label>
+            </div>
+          )}
+        </ConfirmDialog>
       )}
 
       {confirmingRemove && (

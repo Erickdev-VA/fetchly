@@ -9,14 +9,15 @@ import {
   discardBatch,
   ApiError,
   type BatchProgress,
+  type SaveTargetRequest,
 } from "@/lib/api";
 import type { DownloadMode } from "@/lib/platform/types";
 
 export type BatchState =
   | { phase: "idle" }
   | { phase: "starting" }
-  | { phase: "running"; batchId: string; progress: BatchProgress | null }
-  | { phase: "done"; batchId: string; progress: BatchProgress }
+  | { phase: "running"; batchId: string; playlistId: string | null; progress: BatchProgress | null }
+  | { phase: "done"; batchId: string; playlistId: string | null; progress: BatchProgress }
   | { phase: "error"; message: string };
 
 const POLL_INTERVAL_MS = 1000;
@@ -51,23 +52,24 @@ export function useBatchJob() {
       mode: DownloadMode;
       height: number | "best";
       shareable: boolean;
+      target?: SaveTargetRequest;
     }) => {
       stopPolling();
       setState({ phase: "starting" });
       try {
-        const { batchId } = await startBatch(params);
+        const { batchId, playlistId } = await startBatch(params);
         batchIdRef.current = batchId;
-        setState({ phase: "running", batchId, progress: null });
+        setState({ phase: "running", batchId, playlistId, progress: null });
 
         pollRef.current = window.setInterval(async () => {
           try {
             const progress = await getBatchProgress(batchId);
             if (progress.running) {
-              setState({ phase: "running", batchId, progress });
+              setState({ phase: "running", batchId, playlistId, progress });
               return;
             }
             stopPolling();
-            setState({ phase: "done", batchId, progress });
+            setState({ phase: "done", batchId, playlistId, progress });
           } catch {
             stopPolling();
             setState({ phase: "error", message: "Se perdió la conexión durante la descarga." });

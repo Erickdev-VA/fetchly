@@ -5,7 +5,6 @@ import type { DownloadMode } from "@/lib/platform/types";
 const MODES: { id: DownloadMode; label: string }[] = [
   { id: "auto", label: "Video" },
   { id: "audio", label: "Audio" },
-  { id: "mute", label: "Video sin sonido" },
 ];
 
 export function ModeToggle({

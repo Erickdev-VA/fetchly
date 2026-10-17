@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, open, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { categoryDir, thumbnailsDir } from "./paths";
-import { insertItem } from "./items";
+import { insertDownloadedItem } from "./playlists";
 import { fileFingerprint } from "./fingerprint";
-import type { Category, LibraryItem } from "./types";
+import { SAVE_TO_LIBRARY, type Category, type LibraryItem, type SaveTarget } from "./types";
 import { safeFileStem } from "../security/filename";
 import { probeMedia } from "../ytdlp/postprocess";
 import { logger } from "../logger";
@@ -100,8 +100,11 @@ export interface NewDownload {
   thumbnailUrl: string | null;
 }
 
-/** Moves a finished download into Documentos\Fetchly\<categoría> and records it. */
-export async function addDownloadToLibrary(download: NewDownload): Promise<LibraryItem> {
+/**
+ * Moves a finished download into Documentos\Fetchly\<categoría> and records
+ * it, in the chosen playlist when there is one.
+ */
+export async function addDownloadToLibrary(download: NewDownload, target: SaveTarget = SAVE_TO_LIBRARY): Promise<LibraryItem> {
   const id = randomUUID();
   const dir = categoryDir(download.category);
   await mkdir(dir, { recursive: true });
@@ -136,9 +139,9 @@ export async function addDownloadToLibrary(download: NewDownload): Promise<Libra
       thumbnailFile,
       createdAt: Date.now(),
       fingerprint,
+      inLibrary: true,
     };
-    insertItem(item);
-    return item;
+    return insertDownloadedItem(item, target);
   } catch (err) {
     // Don't leave a file the library doesn't know about.
     await unlink(filePath).catch(() => {});

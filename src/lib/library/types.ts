@@ -29,7 +29,21 @@ export interface LibraryItem {
   createdAt: number;
   /** Size plus the first and last bytes, hashed: spots the same file imported twice. */
   fingerprint: string | null;
+  /**
+   * Shown in Música. A song saved only into a playlist has this off and is
+   * seen in its playlists alone; one that ends up in no playlist is put
+   * back in Música, so it can always be reached.
+   */
+  inLibrary: boolean;
 }
+
+/** Where a download goes: a playlist (or none), and whether it also shows in Música. */
+export interface SaveTarget {
+  playlistId: string | null;
+  inLibrary: boolean;
+}
+
+export const SAVE_TO_LIBRARY: SaveTarget = { playlistId: null, inLibrary: true };
 
 /** A library item as the page sees it (GET /api/library). */
 export interface LibraryEntry {
@@ -45,6 +59,8 @@ export interface LibraryEntry {
   hasThumbnail: boolean;
   /** The file was moved or deleted outside the app. */
   missing: boolean;
+  /** Shown in Música (off: only in its playlists). */
+  inLibrary: boolean;
 }
 
 /** A playlist as the Playlists page lists it. */
@@ -63,6 +79,8 @@ export interface PlaylistSummary {
 /** A playlist with its songs, in order. */
 export interface PlaylistDetail extends PlaylistSummary {
   items: LibraryEntry[];
+  /** Its songs that are neither in Música nor in another playlist: deleting the playlist asks about these. */
+  onlyHereIds: string[];
 }
 
 /** Longest playlist name accepted. */
