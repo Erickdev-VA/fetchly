@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { useLibrary } from "@/hooks/useLibrary";
+import { useLibrary, usePlaylists } from "@/hooks/useLibrary";
 import { useSelection, type Selection } from "@/hooks/useSelection";
 import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
@@ -14,7 +14,8 @@ import { PlaylistShelf } from "../playlists/PlaylistShelf";
 import { PlayerIcon } from "../player/PlayerIcon";
 import { PlatformBadge } from "../PlatformBadge";
 import { ErrorBanner } from "../ErrorBanner";
-import { PAGE_CLASS, PageHeader } from "../shell/PageHeader";
+import { LibraryHeader, diskSize } from "../shell/LibraryHeader";
+import { PAGE_CLASS } from "../shell/PageHeader";
 import { EmptyState } from "../shell/EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ItemMenu, type MenuAction } from "./ItemMenu";
@@ -62,6 +63,7 @@ function sortEntries(entries: LibraryEntry[], key: SortKey): LibraryEntry[] {
 
 export function MusicLibrary() {
   const { items, error: loadError, reload } = useLibrary("music");
+  const { playlists } = usePlaylists("music");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
   const [menu, setMenu] = useState<{ entry: LibraryEntry; x: number; y: number } | null>(null);
@@ -166,12 +168,26 @@ export function MusicLibrary() {
   ];
 
   const count = items?.length ?? 0;
+  const playableAll = (items ?? []).filter((e) => !e.missing);
+  const meta = items
+    ? [
+        `${count} canci${count === 1 ? "ón" : "ones"}`,
+        playlists && `${playlists.length} playlist${playlists.length === 1 ? "" : "s"}`,
+        diskSize(items.reduce((sum, e) => sum + (e.missing ? 0 : e.fileSize), 0)) &&
+          `${diskSize(items.reduce((sum, e) => sum + (e.missing ? 0 : e.fileSize), 0))} en tu equipo`,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
 
   return (
     <div className={PAGE_CLASS}>
-      <PageHeader
+      <LibraryHeader
         title="Música"
-        subtitle={items && count > 0 ? `${count} canci${count === 1 ? "ón" : "ones"}` : undefined}
+        meta={meta}
+        disabled={playableAll.length === 0}
+        onPlayAll={() => player.actions.playTracks(playableAll.map(toTrack), 0)}
+        onShuffle={() => player.actions.shuffleTracks(playableAll.map(toTrack))}
       />
 
       {loadError && !items && <ErrorBanner message={loadError} />}
@@ -181,7 +197,7 @@ export function MusicLibrary() {
         </div>
       )}
 
-      {items && <PlaylistShelf hideWhenEmpty={count === 0} />}
+      {items && <PlaylistShelf kind="music" playlists={playlists} hideWhenEmpty={count === 0} />}
 
       {items && count === 0 && (
         <EmptyState icon="music" text="Aún no tienes música. Ve a Descargar." action={{ href: "/descargar", label: "Ir a Descargar" }} />
@@ -189,9 +205,11 @@ export function MusicLibrary() {
 
       {items && count > 0 && (
         <>
-          <h2 className="mb-4 text-2xl font-bold tracking-tight text-white">Canciones</h2>
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 transition-colors focus-within:border-white/25">
+          <h2 className="mb-4 text-2xl font-bold tracking-tight text-white lg:text-[28px]">
+            Canciones <span className="ml-1 text-base font-normal text-white/40">{count}</span>
+          </h2>
+          <div className="mb-5 flex flex-wrap items-center gap-3">
+            <label className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.04] px-4 transition-colors focus-within:border-white/25">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-white/35" aria-hidden>
                 <circle cx="11" cy="11" r="7" />
                 <path d="m20 20-3.5-3.5" strokeLinecap="round" />
@@ -205,12 +223,12 @@ export function MusicLibrary() {
                 className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder:text-white/35 outline-none"
               />
             </label>
-            <label className="flex items-center gap-2 text-xs text-white/45">
+            <label className="flex items-center gap-3 text-sm text-white/45">
               Ordenar por
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
-                className="rounded-xl border border-white/10 bg-[#141417] px-2.5 py-2 text-sm text-white/85 outline-none focus:border-white/25"
+                className="h-11 rounded-xl border border-white/10 bg-[#141417] px-3.5 text-sm text-white/90 outline-none focus:border-white/25"
               >
                 {(Object.keys(SORT_LABEL) as SortKey[]).map((key) => (
                   <option key={key} value={key}>
@@ -224,10 +242,27 @@ export function MusicLibrary() {
           {visible.length === 0 ? (
             <p className="py-12 text-center text-sm text-white/45">No hay canciones que coincidan con «{query.trim()}».</p>
           ) : (
-            <ul className="@container divide-y divide-white/[0.05] rounded-2xl border border-white/[0.06]">
-              {visible.map((entry) => (
+            <div className="@container">
+            <div className="flex items-center gap-3 border-b border-white/[0.08] px-3 pb-2 text-[13px] text-white/50">
+              {selection.active && <span className="w-6 shrink-0" />}
+              <span className="w-6 shrink-0 text-center">#</span>
+              <span className="w-10 shrink-0" />
+              <span className="min-w-0 flex-1">Título</span>
+              <span className="hidden w-28 shrink-0 @xl:block">Plataforma</span>
+              <span className="hidden w-32 shrink-0 @2xl:block">Descargada</span>
+              <span className="flex w-12 shrink-0 justify-end" title="Duración">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" role="img" aria-label="Duración">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <path d="M12 7.5V12l3 2" />
+                </svg>
+              </span>
+              <span className="w-8 shrink-0" />
+            </div>
+            <ul className="mt-2">
+              {visible.map((entry, index) => (
                 <TrackRow
                   key={entry.id}
+                  number={index + 1}
                   entry={entry}
                   isCurrent={entry.id === currentId}
                   isPlaying={entry.id === currentId && player.playing}
@@ -237,6 +272,7 @@ export function MusicLibrary() {
                 />
               ))}
             </ul>
+            </div>
           )}
           <SelectionBar
             active={selection.active}
@@ -294,6 +330,7 @@ export function RemoveDialog({
 }
 
 function TrackRow({
+  number,
   entry,
   isCurrent,
   isPlaying,
@@ -301,6 +338,7 @@ function TrackRow({
   onPlay,
   onMenu,
 }: {
+  number: number;
   entry: LibraryEntry;
   isCurrent: boolean;
   isPlaying: boolean;
@@ -324,13 +362,14 @@ function TrackRow({
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
       }}
-      className={`group flex select-none items-center gap-3 px-3 py-2 transition ${
-        checked ? "bg-white/[0.08]" : isCurrent ? "bg-[var(--accent)]/[0.08]" : "hover:bg-white/[0.03]"
+      className={`group flex select-none items-center gap-3 rounded-md px-3 py-2 transition ${
+        checked ? "bg-white/[0.1]" : isCurrent ? "bg-[var(--accent)]/[0.08]" : "hover:bg-white/[0.06]"
       } ${selection.active ? "cursor-pointer" : ""} ${entry.missing ? "opacity-50" : ""}`}
     >
       {selection.active && (
         <SelectBox checked={checked} label={`Seleccionar ${entry.title}`} onToggle={(range) => selection.toggle(entry.id, range)} />
       )}
+      <span className="w-6 shrink-0 text-center text-[13px] tabular-nums text-white/40">{number}</span>
       <div className="relative h-10 w-10 shrink-0">
         <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="music" className="h-10 w-10 rounded-md" />
         {!entry.missing && (
@@ -348,16 +387,16 @@ function TrackRow({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className={`truncate text-[13.5px] ${isCurrent ? "font-medium text-[var(--accent)]" : "text-white/90"}`} title={entry.title}>
+        <p className={`truncate text-sm font-medium ${isCurrent ? "text-[var(--accent)]" : "text-white/90"}`} title={entry.title}>
           {entry.title}
         </p>
-        <p className="truncate text-xs text-white/40">
+        <p className="truncate text-[13px] text-white/45">
           {entry.missing ? <span className="text-amber-300/90">No encontrado</span> : (entry.artist ?? "—")}
         </p>
       </div>
-      <div className="hidden w-24 shrink-0 @xl:block">{entry.platform && <PlatformBadge platform={entry.platform} />}</div>
-      <span className="hidden w-28 shrink-0 text-xs text-white/40 @2xl:block">{dateFormat.format(entry.createdAt)}</span>
-      <span className="w-12 shrink-0 text-right text-xs tabular-nums text-white/45">{duration ?? "—"}</span>
+      <div className="hidden w-28 shrink-0 @xl:block">{entry.platform && <PlatformBadge platform={entry.platform} />}</div>
+      <span className="hidden w-32 shrink-0 text-[13px] text-white/50 @2xl:block">{dateFormat.format(entry.createdAt)}</span>
+      <span className="w-12 shrink-0 text-right text-[13px] tabular-nums text-white/50">{duration ?? "—"}</span>
       <button
         type="button"
         aria-label={`Opciones de ${entry.title}`}

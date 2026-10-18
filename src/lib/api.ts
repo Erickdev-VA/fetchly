@@ -121,8 +121,9 @@ export function discardBatch(batchId: string): Promise<unknown> {
   return fetch(`/api/batch/${batchId}`, { method: "DELETE" });
 }
 
-export function fetchLibrary(category: Category): Promise<{ revision: string; items: LibraryEntry[] }> {
-  return fetch(`/api/library?category=${category}`, { cache: "no-store" }).then((res) =>
+/** With `everything`, also the songs kept only in playlists. */
+export function fetchLibrary(category: Category, everything = false): Promise<{ revision: string; items: LibraryEntry[] }> {
+  return fetch(`/api/library?category=${category}${everything ? "&all=1" : ""}`, { cache: "no-store" }).then((res) =>
     parseJsonOrThrow<{ revision: string; items: LibraryEntry[] }>(res),
   );
 }
@@ -151,8 +152,9 @@ export function libraryThumbnailUrl(id: string): string {
   return `/api/library/thumbnail/${encodeURIComponent(id)}`;
 }
 
-export function fetchPlaylists(): Promise<{ revision: string; playlists: PlaylistSummary[] }> {
-  return fetch("/api/playlists", { cache: "no-store" }).then((res) =>
+/** The playlists of songs, or (kind "video") of videos. */
+export function fetchPlaylists(kind: Category = "music"): Promise<{ revision: string; playlists: PlaylistSummary[] }> {
+  return fetch(kind === "video" ? "/api/playlists?kind=video" : "/api/playlists", { cache: "no-store" }).then((res) =>
     parseJsonOrThrow<{ revision: string; playlists: PlaylistSummary[] }>(res),
   );
 }
@@ -170,8 +172,8 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 });
 
 /** Creates a playlist, optionally with songs; resolves to its id. */
-export async function createPlaylist(name: string, itemIds: string[] = []): Promise<string> {
-  const { id } = await fetch("/api/playlists", jsonInit("POST", { name, itemIds })).then((res) =>
+export async function createPlaylist(name: string, itemIds: string[] = [], kind: Category = "music"): Promise<string> {
+  const { id } = await fetch("/api/playlists", jsonInit("POST", { name, itemIds, kind })).then((res) =>
     parseJsonOrThrow<{ id: string }>(res),
   );
   return id;

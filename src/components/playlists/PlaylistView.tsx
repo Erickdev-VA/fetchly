@@ -11,12 +11,13 @@ import { deletePlaylist, fetchPlaylist, setInLibrary, updatePlaylist } from "@/l
 import { desktop } from "@/lib/desktop";
 import { formatDuration } from "@/lib/format";
 import { removeFromLibrary, removeManyFromLibrary, songCount } from "@/lib/library/actions";
-import type { LibraryEntry } from "@/lib/library/types";
-import { toTrack } from "@/lib/player/types";
+import type { Category, LibraryEntry } from "@/lib/library/types";
+import { toTrack, toVideoTrack, type Track } from "@/lib/player/types";
 import { moveIds } from "@/lib/reorder";
 import { ErrorBanner } from "../ErrorBanner";
 import { PlatformBadge } from "../PlatformBadge";
 import { PAGE_CLASS } from "../shell/PageHeader";
+import { useSetPageTint } from "../shell/PageTint";
 import { ConfirmDialog } from "../library/ConfirmDialog";
 import { ItemMenu, type MenuAction } from "../library/ItemMenu";
 import { LibraryThumb } from "../library/LibraryThumb";
@@ -24,6 +25,7 @@ import { DropLine, GripDots, SelectBox, SelectionBar, type BarAction } from "../
 import { RemoveDialog } from "../library/MusicLibrary";
 import { PlayerIcon } from "../player/PlayerIcon";
 import { usePlayer } from "../player/PlayerProvider";
+import { AddItemsDialog } from "./AddItemsDialog";
 import { NameDialog } from "./NameDialog";
 import { PlaylistMosaic } from "./PlaylistMosaic";
 import { playlistMeta, usePlaylistPicker } from "./PlaylistPicker";
@@ -42,7 +44,21 @@ function titleSize(name: string): string {
   return "text-3xl lg:text-5xl";
 }
 
-/** One playlist: play or shuffle it, rename or delete it, and reorder, move or remove its songs. */
+/** A shuffled copy (Fisher-Yates). */
+function shuffled<T>(list: T[]): T[] {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+/**
+ * One playlist of songs or of videos: play or shuffle it, add to it, rename
+ * or delete it, and reorder, move or remove what's in it. A playlist of
+ * videos plays in the video player and has no Mi musica options.
+ */
 export function PlaylistView({ id }: { id: string }) {
   const { playlist, error, reload } = usePlaylist(id);
   const player = usePlayer();
@@ -55,6 +71,7 @@ export function PlaylistView({ id }: { id: string }) {
   // ⋯ next to the play button: rename or delete the playlist.
   const [playlistMenu, setPlaylistMenu] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Deleting the playlist: also delete the songs that are only in it (or send them to Música).
   const [deleteSongsToo, setDeleteSongsToo] = useState(true);
@@ -74,6 +91,8 @@ export function PlaylistView({ id }: { id: string }) {
   // The header takes the color of the first song's cover (or the next one that has a cover), like Spotify.
   const coverSong = items.find((e) => e.hasThumbnail) ?? null;
   const tint = useCoverColor(coverSong?.id ?? null, coverSong !== null) ?? NEUTRAL_TINT;
+  // The same color behind the top bar, so it reaches the top of the window.
+  useSetPageTint(playlist ? tint : null);
   const selection = useSelection(ids);
 
   const saveOrder = async (next: string[]) => {
@@ -102,13 +121,26 @@ export function PlaylistView({ id }: { id: string }) {
   if (!playlist) {
     return (
       <div className={PAGE_CLASS}>
-        <BackLink />
+        <BackLink kind="music" />
         {error && <ErrorBanner message={error} />}
       </div>
     );
   }
 
   const playable = items.filter((e) => !e.missing);
+  const isVideo = playlist.kind === "video";
+  const toItemTrack: (entry: LibraryEntry) => Track = isVideo ? toVideoTrack : toTrack;
+  /** Songs go to the music player; videos open in the video player, one after another. */
+  const play = (entries: LibraryEntry[], start = 0) => {
+    const tracks = entries.map(toItemTrack);
+    if (isVideo) player.actions.playVideos(tracks, start);
+    else player.actions.playTracks(tracks, start);
+  };
+  const shuffle = (entries: LibraryEntry[]) => {
+    if (isVideo) player.actions.playVideos(shuffled(entries).map(toVideoTrack), 0);
+    else player.actions.shuffleTracks(entries.map(toTrack));
+  };
+  const itemCount = (n: number) => (isVideo ? `${n} video${n === 1 ? "" : "s"}` : songCount(n));
   const currentId = player.current?.track.id ?? null;
   const selected = items.filter((e) => selection.has(e.id));
   const selectedPlayable = selected.filter((e) => !e.missing);
@@ -129,7 +161,9 @@ export function PlaylistView({ id }: { id: string }) {
     selection.clear();
     const backToLibrary = entries.filter((e) => onlyHere.has(e.id)).length;
     picker.notify(
-      (entries.length === 1 ? `«${entries[0].title}» se quitó de la playlist` : `${songCount(entries.length)} quitadas de la playlist`) +
+      (entries.length === 1
+        ? `«${entries[0].title}» se quitó de la playlist`
+        : `${itemCount(entries.length)} ${isVideo ? "quitados" : "quitadas"} de la playlist`) +
         (backToLibrary > 0 ? ` (${backToLibrary === entries.length && backToLibrary === 1 ? "pasó" : `${songCount(backToLibrary)} pasaron`} a Mi música)` : ""),
     );
   };
@@ -159,7 +193,7 @@ export function PlaylistView({ id }: { id: string }) {
         await removeManyFromLibrary(onlyHereEntries, (entry) => player.actions.forgetTrack(entry.id));
       }
       await deletePlaylist(id);
-      router.push("/musica");
+      router.push(isVideo ? "/videos" : "/musica");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "No se pudo borrar la playlist.");
       await reload();
@@ -208,11 +242,23 @@ export function PlaylistView({ id }: { id: string }) {
 
   const playFrom = (entry: LibraryEntry) => {
     const start = playable.indexOf(entry);
-    if (start >= 0) player.actions.playTracks(playable.map(toTrack), start);
+    if (start >= 0) play(playable, start);
   };
 
   const menuActions = (entry: LibraryEntry): MenuAction[] => {
     const index = ids.indexOf(entry.id);
+    if (isVideo) {
+      return [
+        { label: "Seleccionar", onSelect: () => selection.start(entry.id) },
+        { label: "Reproducir", disabled: entry.missing, onSelect: () => playFrom(entry) },
+        { label: "Subir", disabled: index <= 0, onSelect: () => move(entry, -1) },
+        { label: "Bajar", disabled: index >= ids.length - 1, onSelect: () => move(entry, 1) },
+        ...(bridge
+          ? [{ label: "Mostrar en carpeta", disabled: entry.missing, onSelect: () => void bridge.showItemInFolder(entry.filePath) }]
+          : []),
+        { label: "Quitar de esta playlist", danger: true, onSelect: () => removeFromHere([entry]) },
+      ];
+    }
     return [
       { label: "Seleccionar", onSelect: () => selection.start(entry.id) },
       { label: "Reproducir", disabled: entry.missing, onSelect: () => playFrom(entry) },
@@ -232,7 +278,12 @@ export function PlaylistView({ id }: { id: string }) {
     ];
   };
 
-  const barActions: BarAction[] = [
+  const barActions: BarAction[] = isVideo
+    ? [
+        { label: "Reproducir", primary: true, disabled: selectedPlayable.length === 0, onSelect: () => play(selectedPlayable) },
+        { label: "Quitar de esta playlist", onSelect: () => removeFromHere(selected) },
+      ]
+    : [
     {
       label: "Reproducir",
       primary: true,
@@ -258,6 +309,8 @@ export function PlaylistView({ id }: { id: string }) {
     ...(bridge ? [{ label: "Borrar", danger: true, onSelect: () => setConfirmingRemove(selected) }] : []),
   ];
 
+  const addLabel = isVideo ? "Añadir videos" : "Añadir canciones";
+
   return (
     <div className="relative">
       {/* The header's color, fading into the page below the buttons. */}
@@ -265,7 +318,7 @@ export function PlaylistView({ id }: { id: string }) {
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[560px]" style={{ background: HEADER_FADE }} />
 
       <div className={`${PAGE_CLASS} relative`}>
-        <BackLink />
+        <BackLink kind={playlist.kind} />
 
         <header className="flex flex-col gap-6 sm:flex-row sm:items-end">
           <PlaylistMosaic coverIds={playlist.coverIds} className="aspect-square w-44 shrink-0 rounded-lg shadow-[0_8px_40px_rgb(0_0_0/0.5)] lg:w-56" />
@@ -281,7 +334,7 @@ export function PlaylistView({ id }: { id: string }) {
                 {playlist.name}
               </button>
             </h1>
-            <p className="mt-4 text-sm font-medium text-white/80">{playlistMeta(playlist.count, playlist.durationSeconds)}</p>
+            <p className="mt-4 text-sm font-medium text-white/80">{playlistMeta(playlist.count, playlist.durationSeconds, playlist.kind)}</p>
           </div>
         </header>
 
@@ -289,7 +342,7 @@ export function PlaylistView({ id }: { id: string }) {
           <button
             type="button"
             disabled={playable.length === 0}
-            onClick={() => player.actions.playTracks(playable.map(toTrack), 0)}
+            onClick={() => play(playable)}
             aria-label="Reproducir"
             title="Reproducir"
             className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-lg shadow-black/30 outline-none transition enabled:hover:scale-105 enabled:hover:brightness-110 enabled:active:scale-95 focus-visible:ring-2 focus-visible:ring-white/60 disabled:opacity-40"
@@ -299,7 +352,7 @@ export function PlaylistView({ id }: { id: string }) {
           <button
             type="button"
             disabled={playable.length === 0}
-            onClick={() => player.actions.shuffleTracks(playable.map(toTrack))}
+            onClick={() => shuffle(playable)}
             aria-label="Reproducir en orden aleatorio"
             title="Aleatorio"
             className="flex h-10 w-10 items-center justify-center rounded-full text-white/60 outline-none transition enabled:hover:scale-105 enabled:hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 disabled:opacity-40"
@@ -323,6 +376,16 @@ export function PlaylistView({ id }: { id: string }) {
               <circle cx="19" cy="12" r="1.9" />
             </svg>
           </button>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="ml-auto flex h-10 items-center gap-2 rounded-full border border-white/20 bg-black/10 px-4 text-sm font-semibold text-white outline-none transition hover:border-white/40 hover:bg-white/[0.06] focus-visible:ring-2 focus-visible:ring-white/60"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            {addLabel}
+          </button>
         </div>
 
         {actionError && (
@@ -332,9 +395,16 @@ export function PlaylistView({ id }: { id: string }) {
         )}
 
         {items.length === 0 ? (
-          <p className="mt-8 rounded-2xl border border-dashed border-white/10 px-6 py-12 text-center text-sm text-white/50">
-            Esta playlist está vacía. En Música, abre el menú ⋯ de una canción y elige «Añadir a playlist».
-          </p>
+          <div className="mt-8 flex flex-col items-center gap-4 rounded-2xl border border-dashed border-white/10 px-6 py-12 text-center">
+            <p className="text-sm text-white/50">{isVideo ? "Esta playlist aún no tiene videos." : "Esta playlist aún no tiene canciones."}</p>
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+            >
+              + {addLabel}
+            </button>
+          </div>
         ) : (
           <>
             <div className="mt-8 flex items-center gap-3 border-b border-white/[0.08] px-3 pb-2 text-[13px] text-white/50">
@@ -389,7 +459,7 @@ export function PlaylistView({ id }: { id: string }) {
                         <GripDots />
                       </span>
                     </span>
-                    <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="music" className="h-10 w-10 shrink-0 rounded-md" />
+                    <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon={isVideo ? "video" : "music"} className={`${isVideo ? "w-[71px]" : "w-10"} h-10 shrink-0 rounded-md`} />
                     <div className="min-w-0 flex-1">
                       <p className={`truncate text-[13.5px] ${isCurrent ? "font-medium text-[var(--accent)]" : "text-white/90"}`} title={entry.title}>
                         {entry.title}
@@ -492,7 +562,7 @@ export function PlaylistView({ id }: { id: string }) {
             title="¿Borrar esta playlist?"
             message={
               onlyHereEntries.length === 0
-                ? `Se borrará «${playlist.name}». Las canciones siguen en Música.`
+                ? `Se borrará «${playlist.name}». ${isVideo ? "Los videos siguen en Videos." : "Las canciones siguen en Música."}`
                 : `Se borrará «${playlist.name}». ${
                     onlyHereEntries.length === 1 ? "1 canción solo está" : `${songCount(onlyHereEntries.length)} solo están`
                   } en esta playlist (no en Mi música). ¿Qué hacemos con ${onlyHereEntries.length === 1 ? "ella" : "ellas"}?`
@@ -530,6 +600,21 @@ export function PlaylistView({ id }: { id: string }) {
           </ConfirmDialog>
         )}
 
+        {adding && (
+          <AddItemsDialog
+            kind={playlist.kind}
+            playlistId={id}
+            playlistName={playlist.name}
+            existingIds={new Set(ids)}
+            onAdded={(added) => {
+              setAdding(false);
+              picker.notify(added === 0 ? "Ya estaban en la playlist" : `${itemCount(added)} ${isVideo ? (added === 1 ? "añadido" : "añadidos") : added === 1 ? "añadida" : "añadidas"} a «${playlist.name}»`);
+              void reload();
+            }}
+            onClose={() => setAdding(false)}
+          />
+        )}
+
         {confirmingRemove && (
           <RemoveDialog entries={confirmingRemove} onConfirm={() => void confirmRemove()} onCancel={() => setConfirmingRemove(null)} />
         )}
@@ -542,10 +627,10 @@ export function PlaylistView({ id }: { id: string }) {
 const HEADER_FADE =
   "linear-gradient(to bottom, rgb(0 0 0 / 0) 0%, rgb(0 0 0 / 0.12) 40%, color-mix(in srgb, var(--background) 72%, transparent) 62%, var(--background) 100%)";
 
-function BackLink() {
+function BackLink({ kind }: { kind: Category }) {
   return (
-    <Link href="/musica" className="mb-5 inline-flex items-center gap-1 text-sm text-white/50 transition hover:text-white">
-      ← Música
+    <Link href={kind === "video" ? "/videos" : "/musica"} className="mb-5 inline-flex items-center gap-1 text-sm text-white/60 transition hover:text-white">
+      ← {kind === "video" ? "Videos" : "Música"}
     </Link>
   );
 }

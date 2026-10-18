@@ -4,11 +4,12 @@ import { AppError } from "../errors";
 import { getDb } from "./db";
 import { toEntry } from "./entries";
 import { bumpLibraryRevision, fromRow, insertItem, type ItemRow } from "./items";
-import { PLAYLIST_NAME_MAX, type LibraryItem, type PlaylistDetail, type PlaylistSummary, type SaveTarget } from "./types";
+import { PLAYLIST_NAME_MAX, type Category, type LibraryItem, type PlaylistDetail, type PlaylistSummary, type SaveTarget } from "./types";
 
 interface PlaylistRow {
   id: string;
   name: string;
+  kind: Category;
   created_at: number;
   updated_at: number;
   count: number;
@@ -54,6 +55,7 @@ function toSummary(db: DatabaseSync, row: PlaylistRow): PlaylistSummary {
   return {
     id: row.id,
     name: row.name,
+    kind: row.kind,
     count: row.count,
     durationSeconds: row.duration ?? 0,
     coverIds: coverIds(db, row.id),
@@ -63,18 +65,18 @@ function toSummary(db: DatabaseSync, row: PlaylistRow): PlaylistSummary {
 }
 
 const SUMMARY_SELECT = `
-  SELECT pl.id, pl.name, pl.created_at, pl.updated_at,
+  SELECT pl.id, pl.name, pl.kind, pl.created_at, pl.updated_at,
          COUNT(i.id) AS count, SUM(i.duration_seconds) AS duration
   FROM playlists pl
   LEFT JOIN playlist_items p ON p.playlist_id = pl.id
   LEFT JOIN items i ON i.id = p.item_id`;
 
-/** Most recently changed first. */
-export function listPlaylists(): PlaylistSummary[] {
+/** The playlists of songs (or of videos), most recently changed first. */
+export function listPlaylists(kind: Category = "music"): PlaylistSummary[] {
   const db = getDb();
   const rows = db
-    .prepare(`${SUMMARY_SELECT} GROUP BY pl.id ORDER BY pl.updated_at DESC`)
-    .all() as unknown as PlaylistRow[];
+    .prepare(`${SUMMARY_SELECT} WHERE pl.kind = ? GROUP BY pl.id ORDER BY pl.updated_at DESC`)
+    .all(kind) as unknown as PlaylistRow[];
   return rows.map((row) => toSummary(db, row));
 }
 
@@ -118,7 +120,7 @@ function showStrays(db: DatabaseSync): void {
 export function insertDownloadedItem(item: LibraryItem, target: SaveTarget): LibraryItem {
   const db = getDb();
   const saved = inTransaction(db, () => {
-    const inPlaylist = target.playlistId !== null && item.category === "music" && playlistExists(db, target.playlistId);
+    const inPlaylist = target.playlistId !== null && item.category === "music" && playlistExists(db, target.playlistId, "music");
     const row = { ...item, inLibrary: target.inLibrary || !inPlaylist };
     insertItem(row);
     if (inPlaylist) {
@@ -135,7 +137,7 @@ export function insertDownloadedItem(item: LibraryItem, target: SaveTarget): Lib
 export function placeExistingSong(itemId: string, target: SaveTarget): void {
   const db = getDb();
   inTransaction(db, () => {
-    const inPlaylist = target.playlistId !== null && playlistExists(db, target.playlistId);
+    const inPlaylist = target.playlistId !== null && playlistExists(db, target.playlistId, "music");
     if (inPlaylist && appendSongs(db, target.playlistId!, [itemId]) > 0) touch(db, target.playlistId!);
     if (target.inLibrary || !inPlaylist) db.prepare("UPDATE items SET in_library = 1 WHERE id = ?").run(itemId);
   });
@@ -148,7 +150,7 @@ export function placeExistingSong(itemId: string, target: SaveTarget): void {
  */
 export function setInLibrary(itemIds: unknown, inLibrary: boolean): number {
   const db = getDb();
-  const ids = existingSongs(db, itemIds);
+  const ids = existingItems(db, itemIds, "music");
   const update = db.prepare(
     inLibrary
       ? "UPDATE items SET in_library = 1 WHERE id = ? AND in_library = 0"
@@ -160,13 +162,13 @@ export function setInLibrary(itemIds: unknown, inLibrary: boolean): number {
   return changed;
 }
 
-/** Of `ids`, the songs (not videos) that exist, in the given order, without repeats. */
-function existingSongs(db: DatabaseSync, ids: unknown): string[] {
+/** Of `ids`, the songs (or videos) that exist, in the given order, without repeats. */
+function existingItems(db: DatabaseSync, ids: unknown, kind: Category): string[] {
   if (!Array.isArray(ids)) return [];
-  const check = db.prepare("SELECT 1 FROM items WHERE id = ? AND category = 'music'");
+  const check = db.prepare("SELECT 1 FROM items WHERE id = ? AND category = ?");
   const seen = new Set<string>();
   for (const id of ids) {
-    if (typeof id === "string" && !seen.has(id) && check.get(id)) seen.add(id);
+    if (typeof id === "string" && !seen.has(id) && check.get(id, kind)) seen.add(id);
   }
   return [...seen];
 }
@@ -187,14 +189,14 @@ function touch(db: DatabaseSync, playlistId: string): void {
   db.prepare("UPDATE playlists SET updated_at = ? WHERE id = ?").run(Date.now(), playlistId);
 }
 
-/** Creates a playlist, optionally with songs (in that order). Returns its id. */
-export function createPlaylist(name: string, itemIds: unknown): string {
+/** Creates a playlist of songs (or videos), optionally with some (in that order). Returns its id. */
+export function createPlaylist(name: string, itemIds: unknown, kind: Category = "music"): string {
   const db = getDb();
   const id = randomUUID();
   const now = Date.now();
   inTransaction(db, () => {
-    db.prepare("INSERT INTO playlists (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, name, now, now);
-    appendSongs(db, id, existingSongs(db, itemIds));
+    db.prepare("INSERT INTO playlists (id, name, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(id, name, kind, now, now);
+    appendSongs(db, id, existingItems(db, itemIds, kind));
   });
   bumpLibraryRevision();
   return id;
@@ -222,16 +224,28 @@ export function deletePlaylist(id: string): boolean {
   return changes > 0;
 }
 
-function playlistExists(db: DatabaseSync, id: string): boolean {
-  return Boolean(db.prepare("SELECT 1 FROM playlists WHERE id = ?").get(id));
+function playlistKind(db: DatabaseSync, id: string): Category | null {
+  const row = db.prepare("SELECT kind FROM playlists WHERE id = ?").get(id) as { kind: Category } | undefined;
+  return row?.kind ?? null;
 }
 
-/** Adds songs at the end; songs already in it are skipped. Returns how many were added, or null if there's no such playlist. */
+/** With `kind`, only a playlist of that kind counts. */
+function playlistExists(db: DatabaseSync, id: string, kind?: Category): boolean {
+  const found = playlistKind(db, id);
+  return found !== null && (kind === undefined || found === kind);
+}
+
+/**
+ * Adds songs (or videos, to a playlist of videos) at the end; ones already
+ * in it, or of the other kind, are skipped. Returns how many were added, or
+ * null if there's no such playlist.
+ */
 export function addToPlaylist(id: string, itemIds: unknown): number | null {
   const db = getDb();
-  if (!playlistExists(db, id)) return null;
+  const kind = playlistKind(db, id);
+  if (!kind) return null;
   const added = inTransaction(db, () => {
-    const count = appendSongs(db, id, existingSongs(db, itemIds));
+    const count = appendSongs(db, id, existingItems(db, itemIds, kind));
     if (count > 0) touch(db, id);
     return count;
   });

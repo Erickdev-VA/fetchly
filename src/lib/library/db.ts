@@ -61,6 +61,9 @@ const MIGRATIONS: (string | ((db: DatabaseSync) => void))[] = [
   // Songs downloaded straight into a playlist can stay out of Música: they
   // show in their playlists only. Everything saved before this is in Música.
   `ALTER TABLE items ADD COLUMN in_library INTEGER NOT NULL DEFAULT 1;`,
+  // A playlist holds songs or videos, never both. Every playlist made before
+  // this is of songs.
+  `ALTER TABLE playlists ADD COLUMN kind TEXT NOT NULL DEFAULT 'music' CHECK (kind IN ('music', 'video'));`,
 ];
 
 // See the comment in lib/jobs/downloadJobs.ts about pinning state to globalThis.

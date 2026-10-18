@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { addToPlaylist, createPlaylist } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { songCount } from "@/lib/library/actions";
+import type { Category } from "@/lib/library/types";
 import { usePlaylists } from "@/hooks/useLibrary";
 import { PlaylistMosaic } from "./PlaylistMosaic";
 import { NameDialog } from "./NameDialog";
@@ -25,8 +26,9 @@ interface PickerApi {
    * Opens "Añadir a playlist" for these songs. With `moveFrom` it's "Mover a
    * playlist": once they're added (or were already there), `onMoved` takes
    * them out of the playlist they came from. If adding fails, they stay.
+   * With kind "video", these are videos and only playlists of videos are offered.
    */
-  addToPlaylist(songs: Song[], moveFrom?: MoveFrom): void;
+  addToPlaylist(songs: Song[], moveFrom?: MoveFrom, kind?: Category): void;
   /** A short message at the bottom of the window. */
   notify(message: string): void;
 }
@@ -41,8 +43,9 @@ export function usePlaylistPicker(): PickerApi {
 
 const TOAST_MS = 3000;
 
-function describe(songs: Song[]): string {
-  return songs.length === 1 ? `«${songs[0].title}»` : songCount(songs.length);
+function describe(songs: Song[], kind: Category = "music"): string {
+  if (songs.length === 1) return `«${songs[0].title}»`;
+  return kind === "video" ? `${songs.length} videos` : songCount(songs.length);
 }
 
 /**
@@ -53,6 +56,7 @@ function describe(songs: Song[]): string {
 export function PlaylistPickerProvider({ children }: { children: React.ReactNode }) {
   const [songs, setSongs] = useState<Song[] | null>(null);
   const [moveFrom, setMoveFrom] = useState<MoveFrom | null>(null);
+  const [kind, setKind] = useState<Category>("music");
   const [naming, setNaming] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -71,9 +75,10 @@ export function PlaylistPickerProvider({ children }: { children: React.ReactNode
 
   const api = useMemo<PickerApi>(
     () => ({
-      addToPlaylist: (next, from) => {
+      addToPlaylist: (next, from, nextKind = "music") => {
         setSongs(next.length ? next : null);
         setMoveFrom(from ?? null);
+        setKind(nextKind);
       },
       notify,
     }),
@@ -92,14 +97,14 @@ export function PlaylistPickerProvider({ children }: { children: React.ReactNode
     if (moveFrom) {
       try {
         await moveFrom.onMoved();
-        notify(`${describe(songs)} ${songs.length === 1 ? "movida" : "movidas"} a «${name}»`);
+        notify(`${describe(songs, kind)} ${songs.length === 1 ? "movida" : "movidas"} a «${name}»`);
       } catch (err) {
         notify(err instanceof Error ? err.message : `Se añadieron a «${name}», pero no se pudieron quitar de esta playlist.`);
       }
-    } else if (added === "created") notify(`Playlist «${name}» creada con ${describe(songs)}`);
+    } else if (added === "created") notify(`Playlist «${name}» creada con ${describe(songs, kind)}`);
     else if (added === 0) notify(`${songs.length === 1 ? "Ya estaba" : "Ya estaban"} en «${name}»`);
-    else if (songs.length === 1) notify(`«${songs[0].title}» añadida a «${name}»`);
-    else notify(`${added} canciones añadidas a «${name}»`);
+    else if (songs.length === 1) notify(`«${songs[0].title}» ${kind === "video" ? "añadido" : "añadida"} a «${name}»`);
+    else notify(kind === "video" ? `${added} videos añadidos a «${name}»` : `${added} canciones añadidas a «${name}»`);
   };
 
   const addTo = async (playlist: { id: string; name: string }) => {
@@ -118,6 +123,7 @@ export function PlaylistPickerProvider({ children }: { children: React.ReactNode
       {songs && !naming && (
         <PickerDialog
           songs={songs}
+          kind={kind}
           moving={moveFrom !== null}
           exclude={moveFrom?.playlistId ?? null}
           onPick={(p) => void addTo(p)}
@@ -130,7 +136,7 @@ export function PlaylistPickerProvider({ children }: { children: React.ReactNode
           title="Nueva playlist"
           submitLabel={moveFrom ? "Crear y mover" : "Crear y añadir"}
           onSubmit={async (name) => {
-            await createPlaylist(name, songs.map((s) => s.id));
+            await createPlaylist(name, songs.map((s) => s.id), kind);
             await finish(name, "created");
             close();
           }}
@@ -151,6 +157,7 @@ export function PlaylistPickerProvider({ children }: { children: React.ReactNode
 
 function PickerDialog({
   songs,
+  kind,
   moving,
   exclude,
   onPick,
@@ -158,6 +165,7 @@ function PickerDialog({
   onCancel,
 }: {
   songs: Song[];
+  kind: Category;
   moving: boolean;
   /** A playlist not to list (the one the songs are moving out of). */
   exclude: string | null;
@@ -165,7 +173,7 @@ function PickerDialog({
   onNew: () => void;
   onCancel: () => void;
 }) {
-  const { playlists, error } = usePlaylists();
+  const { playlists, error } = usePlaylists(kind);
 
   return (
     <dialog
@@ -182,7 +190,7 @@ function PickerDialog({
       className="m-auto w-[min(420px,calc(100vw-32px))] rounded-2xl border border-white/10 bg-[#17171b] p-5 text-white backdrop:bg-black/60"
     >
       <h2 className="text-[15px] font-semibold">{moving ? "Mover a playlist" : "Añadir a playlist"}</h2>
-      <p className="mt-1 truncate text-sm text-white/50">{describe(songs)}</p>
+      <p className="mt-1 truncate text-sm text-white/50">{describe(songs, kind)}</p>
 
       <div className="mt-4 max-h-[min(360px,50vh)] overflow-y-auto">
         <button
@@ -206,7 +214,7 @@ function PickerDialog({
             <PlaylistMosaic coverIds={p.coverIds} className="h-10 w-10 shrink-0 rounded-md" />
             <span className="min-w-0">
               <span className="block truncate text-sm text-white/90">{p.name}</span>
-              <span className="block text-xs text-white/40">{playlistMeta(p.count, p.durationSeconds)}</span>
+              <span className="block text-xs text-white/40">{playlistMeta(p.count, p.durationSeconds, p.kind)}</span>
             </span>
           </button>
         ))}
@@ -226,8 +234,8 @@ function PickerDialog({
 }
 
 /** "12 canciones · 48 min" */
-export function playlistMeta(count: number, durationSeconds: number): string {
-  const songs = `${count} canci${count === 1 ? "ón" : "ones"}`;
+export function playlistMeta(count: number, durationSeconds: number, kind: Category = "music"): string {
+  const songs = kind === "video" ? `${count} video${count === 1 ? "" : "s"}` : `${count} canci${count === 1 ? "ón" : "ones"}`;
   if (durationSeconds <= 0) return songs;
   const minutes = Math.round(durationSeconds / 60);
   const length = minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : minutes > 0 ? `${minutes} min` : formatDuration(durationSeconds);

@@ -6,6 +6,7 @@ import { Logo } from "../Logo";
 import { LibrarySearch } from "./LibrarySearch";
 import { NavIcon, type NavIconName } from "./NavIcon";
 import { FRAME_CLASS } from "./PageHeader";
+import { usePageTint } from "./PageTint";
 
 // Playlists live at the top of Música, so a playlist's page counts as being in Música.
 const SECTIONS: { href: string; label: string; icon?: NavIconName; also?: string }[] = [
@@ -33,8 +34,13 @@ function isCurrent(pathname: string, section: (typeof SECTIONS)[number]): boolea
 export function TopBar() {
   const pathname = usePathname();
   const inSettings = isUnder(pathname, "/ajustes");
+  // Over a playlist's color the pills and the search get a dark glass, so they still read.
+  const tint = usePageTint();
+  const idle = tint
+    ? "border-transparent bg-black/20 text-white/90 hover:bg-black/30 hover:text-white"
+    : "border-white/[0.08] text-white/75 hover:border-white/15 hover:bg-white/[0.04] hover:text-white";
   return (
-    <header className="shrink-0">
+    <header className="shrink-0 transition-colors duration-700" style={{ backgroundColor: tint ?? "transparent" }}>
       <div className={`${FRAME_CLASS} flex h-[76px] items-center gap-3 lg:gap-5`}>
         <Link href="/" aria-label="Inicio" className="shrink-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60">
           <Logo compact />
@@ -49,9 +55,7 @@ export function TopBar() {
                 href={s.href}
                 aria-current={current ? "page" : undefined}
                 className={`flex h-10 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60 ${
-                  current
-                    ? "border-white bg-white text-black"
-                    : "border-white/[0.08] text-white/75 hover:border-white/15 hover:bg-white/[0.04] hover:text-white"
+                  current ? "border-white bg-white text-black" : idle
                 }`}
               >
                 {s.icon && <NavIcon name={s.icon} className="h-4 w-4" />}
@@ -62,16 +66,14 @@ export function TopBar() {
         </nav>
 
         <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-3">
-          <LibrarySearch />
+          <LibrarySearch tinted={tint !== null} />
           <Link
             href="/ajustes"
             aria-label="Ajustes"
             title="Ajustes"
             aria-current={inSettings ? "page" : undefined}
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60 ${
-              inSettings
-                ? "border-white bg-white text-black"
-                : "border-white/[0.08] text-white/75 hover:border-white/15 hover:bg-white/[0.04] hover:text-white"
+              inSettings ? "border-white bg-white text-black" : idle
             }`}
           >
             <NavIcon name="settings" />

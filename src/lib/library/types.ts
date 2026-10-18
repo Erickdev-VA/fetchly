@@ -67,7 +67,9 @@ export interface LibraryEntry {
 export interface PlaylistSummary {
   id: string;
   name: string;
-  /** Number of songs. */
+  /** Songs (music) or videos: a playlist holds one or the other. */
+  kind: Category;
+  /** Number of songs (or videos). */
   count: number;
   durationSeconds: number;
   /** Up to four songs with a cover, in playlist order, for the mosaic. */

@@ -146,10 +146,13 @@ export function getItem(id: string): LibraryItem | null {
   return row ? fromRow(row) : null;
 }
 
-/** What Música or Videos shows, newest first: songs kept only in playlists are left out. */
-export function listItems(category: Category): LibraryItem[] {
+/**
+ * What Música or Videos shows, newest first: songs kept only in playlists
+ * are left out, unless `everything` (picking songs to add to a playlist).
+ */
+export function listItems(category: Category, everything = false): LibraryItem[] {
   const rows = getDb()
-    .prepare("SELECT * FROM items WHERE category = ? AND in_library = 1 ORDER BY created_at DESC")
+    .prepare(`SELECT * FROM items WHERE category = ?${everything ? "" : " AND in_library = 1"} ORDER BY created_at DESC`)
     .all(category) as unknown as ItemRow[];
   return rows.map(fromRow);
 }

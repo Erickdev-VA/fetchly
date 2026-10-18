@@ -11,12 +11,15 @@ export function NameDialog({
   title,
   initialName = "",
   submitLabel,
+  note,
   onSubmit,
   onCancel,
 }: {
   title: string;
   initialName?: string;
   submitLabel: string;
+  /** Shown under the name box (a hint or a link). */
+  note?: React.ReactNode;
   onSubmit: (name: string) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -71,6 +74,7 @@ export function NameDialog({
           className="mt-4 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-white/25"
         />
         {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
+        {note && <div className="mt-3">{note}</div>}
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"

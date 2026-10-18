@@ -29,7 +29,7 @@ function matches(entry: LibraryEntry, words: string[]): boolean {
  * it over the window. The library is read when the box gets focus, so it is
  * current without polling in the background.
  */
-export function LibrarySearch() {
+export function LibrarySearch({ tinted = false }: { tinted?: boolean }) {
   const player = usePlayer();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -91,7 +91,7 @@ export function LibrarySearch() {
 
   return (
     <div className="relative w-full min-w-[120px] max-w-[460px]">
-      <label className="flex h-10 items-center gap-2.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 transition-colors focus-within:border-white/20 hover:border-white/15">
+      <label className={`flex h-10 items-center gap-2.5 rounded-full border px-4 transition-colors focus-within:border-white/20 hover:border-white/15 ${tinted ? "border-transparent bg-black/25" : "border-white/[0.08] bg-white/[0.03]"}`}>
         <NavIcon name="search" className="h-4 w-4 shrink-0 text-white/45" />
         <input
           ref={inputRef}

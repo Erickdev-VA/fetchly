@@ -19,7 +19,7 @@ export function resolveSaveTarget(value: unknown, mode: DownloadMode): SaveTarge
     return { playlistId: createPlaylist(cleanPlaylistName(newPlaylistName), []), inLibrary: alsoInLibrary };
   }
   if (playlistId === undefined || playlistId === null) return SAVE_TO_LIBRARY;
-  if (typeof playlistId !== "string" || !getPlaylist(playlistId)) {
+  if (typeof playlistId !== "string" || getPlaylist(playlistId)?.kind !== "music") {
     throw new AppError("NOT_FOUND", "Esa playlist ya no existe.");
   }
   return { playlistId, inLibrary: alsoInLibrary };

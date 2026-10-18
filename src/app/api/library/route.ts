@@ -7,14 +7,14 @@ import type { Category } from "@/lib/library/types";
 
 const CATEGORIES: Category[] = ["music", "video"];
 
-/** Every item of one category, newest first. */
+/** Every item of one category, newest first (?all=1: also the songs kept only in playlists). */
 export async function GET(request: NextRequest) {
   try {
     const category = request.nextUrl.searchParams.get("category") as Category | null;
     if (!category || !CATEGORIES.includes(category)) throw new AppError("NOT_FOUND", "Categoría no válida.");
 
     const revision = libraryRevision();
-    const items = listItems(category).map(toEntry);
+    const items = listItems(category, request.nextUrl.searchParams.get("all") === "1").map(toEntry);
     return NextResponse.json({ revision, items }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return errorResponse(err);

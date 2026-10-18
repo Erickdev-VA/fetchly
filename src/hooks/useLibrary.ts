@@ -68,8 +68,12 @@ export function useLibrary(category: Category) {
   return { items: value, error, reload };
 }
 
-export function usePlaylists() {
-  const load = useCallback(() => fetchPlaylists().then(({ revision, playlists }) => ({ revision, value: playlists })), []);
+/** The playlists of songs, or (kind "video") of videos. */
+export function usePlaylists(kind: Category = "music") {
+  const load = useCallback(
+    () => fetchPlaylists(kind).then(({ revision, playlists }) => ({ revision, value: playlists })),
+    [kind],
+  );
   const { value, error, reload } = useLiveResource<PlaylistSummary[]>(load, "No se pudieron cargar las playlists.");
   return { playlists: value, error, reload };
 }
