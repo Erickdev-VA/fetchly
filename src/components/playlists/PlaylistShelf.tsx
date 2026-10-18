@@ -9,7 +9,7 @@ import { NameDialog } from "./NameDialog";
 import { PlaylistMosaic } from "./PlaylistMosaic";
 import { playlistMeta } from "./PlaylistPicker";
 
-const CARD_CLASS = "w-36 shrink-0 snap-start lg:w-40 2xl:w-48";
+const CARD_CLASS = "w-40 shrink-0 snap-start lg:w-44 2xl:w-52";
 
 /**
  * The playlists, as one row of cards at the top of Música (Spotify's "Tu
@@ -45,11 +45,11 @@ export function PlaylistShelf({ hideWhenEmpty = false }: { hideWhenEmpty?: boole
   };
 
   return (
-    <section aria-labelledby="playlists-heading" className="mb-8">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 id="playlists-heading" className="text-[15px] font-semibold text-white">
+    <section aria-labelledby="playlists-heading" className="mb-10">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 id="playlists-heading" className="text-2xl font-bold tracking-tight text-white">
           Playlists
-          {playlists.length > 0 && <span className="ml-2 text-xs font-normal text-white/40">{playlists.length}</span>}
+          {playlists.length > 0 && <span className="ml-2 text-sm font-normal text-white/40">{playlists.length}</span>}
         </h2>
         {!(edges.start && edges.end) && (
           <div className="flex gap-1">
@@ -70,11 +70,11 @@ export function PlaylistShelf({ hideWhenEmpty = false }: { hideWhenEmpty?: boole
             onClick={() => setCreating(true)}
             className="group block w-full rounded-2xl p-2 text-left outline-none transition hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
           >
-            <span className="flex aspect-square w-full items-center justify-center rounded-xl border border-dashed border-white/15 text-4xl font-light text-white/45 transition group-hover:border-white/30 group-hover:text-white/80">
+            <span className="flex aspect-square w-full items-center justify-center rounded-2xl border border-dashed border-white/15 text-4xl font-light text-white/45 transition group-hover:border-white/30 group-hover:text-white/80">
               +
             </span>
-            <span className="mt-2.5 block truncate text-sm font-medium text-white/90">Nueva playlist</span>
-            <span className="mt-0.5 block truncate text-xs text-white/40">
+            <span className="mt-3 block truncate text-[15px] font-medium text-white/90">Nueva playlist</span>
+            <span className="mt-0.5 block truncate text-[13px] text-white/45">
               {playlists.length === 0 ? "Aún no tienes ninguna" : "Crear"}
             </span>
           </button>
@@ -85,11 +85,11 @@ export function PlaylistShelf({ hideWhenEmpty = false }: { hideWhenEmpty?: boole
               href={`/playlists/${p.id}`}
               className="group block rounded-2xl p-2 outline-none transition hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
             >
-              <PlaylistMosaic coverIds={p.coverIds} className="aspect-square w-full rounded-xl shadow-lg shadow-black/40" />
-              <p className="mt-2.5 truncate text-sm font-medium text-white/90" title={p.name}>
+              <PlaylistMosaic coverIds={p.coverIds} className="aspect-square w-full rounded-2xl shadow-lg shadow-black/40" />
+              <p className="mt-3 truncate text-[15px] font-medium text-white/90" title={p.name}>
                 {p.name}
               </p>
-              <p className="mt-0.5 truncate text-xs text-white/40">{playlistMeta(p.count, p.durationSeconds)}</p>
+              <p className="mt-0.5 truncate text-[13px] text-white/45">{playlistMeta(p.count, p.durationSeconds)}</p>
             </Link>
           </li>
         ))}

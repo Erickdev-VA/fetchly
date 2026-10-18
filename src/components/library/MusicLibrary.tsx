@@ -19,7 +19,7 @@ import { EmptyState } from "../shell/EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ItemMenu, type MenuAction } from "./ItemMenu";
 import { LibraryThumb } from "./LibraryThumb";
-import { SelectBox, SelectionBar, type BarAction } from "./ListBits";
+import { PlayingBars, SelectBox, SelectionBar, type BarAction } from "./ListBits";
 
 type SortKey = "recent" | "title" | "artist" | "duration";
 
@@ -184,12 +184,12 @@ export function MusicLibrary() {
       {items && <PlaylistShelf hideWhenEmpty={count === 0} />}
 
       {items && count === 0 && (
-        <EmptyState icon="music" text="Aún no tienes música. Ve a Descargar." action={{ href: "/", label: "Ir a Descargar" }} />
+        <EmptyState icon="music" text="Aún no tienes música. Ve a Descargar." action={{ href: "/descargar", label: "Ir a Descargar" }} />
       )}
 
       {items && count > 0 && (
         <>
-          <h2 className="mb-3 text-[15px] font-semibold text-white">Canciones</h2>
+          <h2 className="mb-4 text-2xl font-bold tracking-tight text-white">Canciones</h2>
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 transition-colors focus-within:border-white/25">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-white/35" aria-hidden>
@@ -375,20 +375,5 @@ function TrackRow({
         </svg>
       </button>
     </li>
-  );
-}
-
-/** The little bouncing bars on the song that's playing. */
-function PlayingBars() {
-  return (
-    <span className="flex h-3.5 items-end gap-[2px]" aria-hidden>
-      {[0, 0.2, 0.4].map((delay) => (
-        <span
-          key={delay}
-          className="w-[3px] rounded-sm bg-[var(--accent)]"
-          style={{ animation: `playingBar 0.9s ease-in-out ${delay}s infinite alternate` }}
-        />
-      ))}
-    </span>
   );
 }

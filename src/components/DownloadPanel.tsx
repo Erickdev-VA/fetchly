@@ -26,11 +26,11 @@ function rememberedMode(): DownloadMode {
 
 /**
  * The Descargar page. The (app) layout renders it all the time and only
- * hides it away from "/", so a download keeps showing its progress (and the
+ * shows it at /descargar, so a download keeps showing its progress (and the
  * pasted link, the list and the choices) after visiting another section.
  */
 export function DownloadPanel() {
-  const visible = usePathname() === "/";
+  const visible = usePathname() === "/descargar";
   const [url, setUrl] = useState("");
   // Picked on the result card, once the link shows what it is. (Nothing on
   // the first render depends on it, so reading storage here can't mismatch.)

@@ -72,11 +72,11 @@ export function VideoLibrary() {
       )}
 
       {items && count === 0 && (
-        <EmptyState icon="video" text="Aún no tienes videos. Ve a Descargar." action={{ href: "/", label: "Ir a Descargar" }} />
+        <EmptyState icon="video" text="Aún no tienes videos. Ve a Descargar." action={{ href: "/descargar", label: "Ir a Descargar" }} />
       )}
 
       {items && count > 0 && (
-        <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
           {items.map((entry) => (
             <li
               key={entry.id}
@@ -93,17 +93,17 @@ export function VideoLibrary() {
                 className="block w-full rounded-2xl p-2 text-left outline-none transition hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
               >
                 <div className="relative">
-                  <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="video" className="aspect-video w-full rounded-xl" />
+                  <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="video" className="aspect-video w-full rounded-2xl shadow-lg shadow-black/40" />
                   {formatDuration(entry.durationSeconds) && (
-                    <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white">
+                    <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white">
                       {formatDuration(entry.durationSeconds)}
                     </span>
                   )}
                 </div>
-                <p className="mt-2.5 line-clamp-2 text-[13.5px] leading-snug text-white/90" title={entry.title}>
+                <p className="mt-3 line-clamp-2 text-[15px] font-medium leading-snug text-white/90" title={entry.title}>
                   {entry.title}
                 </p>
-                <div className="mt-1 flex items-center gap-2 text-xs text-white/40">
+                <div className="mt-1 flex items-center gap-2 text-[13px] text-white/45">
                   {entry.missing ? (
                     <span className="text-amber-300/90">No encontrado</span>
                   ) : (

@@ -47,3 +47,12 @@ export function forgetPosition(id: string): void {
   delete positions[id];
   write(positions);
 }
+
+/** Every remembered video, the most recently watched first. */
+export function recentPositions(): { id: string; seconds: number }[] {
+  const positions = read();
+  return Object.entries(positions)
+    .filter(([, p]) => typeof p?.seconds === "number" && Number.isFinite(p.seconds))
+    .sort(([, a], [, b]) => b.at - a.at)
+    .map(([id, p]) => ({ id, seconds: p.seconds }));
+}

@@ -147,3 +147,18 @@ export function SelectionBar({
     </div>
   );
 }
+
+/** The little bouncing bars on what's playing. `className` sizes them (default: 14 px tall). */
+export function PlayingBars({ className = "h-3.5 gap-[2px]", barClassName = "w-[3px]" }: { className?: string; barClassName?: string }) {
+  return (
+    <span className={`flex items-end ${className}`} aria-hidden>
+      {[0, 0.2, 0.4].map((delay) => (
+        <span
+          key={delay}
+          className={`rounded-sm bg-[var(--accent)] ${barClassName}`}
+          style={{ animation: `playingBar 0.9s ease-in-out ${delay}s infinite alternate` }}
+        />
+      ))}
+    </span>
+  );
+}
