@@ -104,24 +104,24 @@ export function DownloadPanel() {
 
   return (
     <div hidden={!visible} className="h-full">
-      <div className={`${FRAME_CLASS} pb-16 ${hasResult ? "pt-8" : "pt-10 lg:pt-12"}`}>
-        <div className="mx-auto flex w-full max-w-[1100px] flex-col items-center">
+      <div className={`${FRAME_CLASS} pb-16 ${hasResult ? "pt-8" : "pt-8 lg:pt-12"}`}>
+        <div className="mx-auto flex w-full max-w-[880px] flex-col items-center">
           {/* With nothing pasted yet the page explains itself and shows the latest
               downloads; once there is something to show, the link box moves up. */}
           {!hasResult && (
             <header className="mb-8 text-center">
-              <h1 className="text-[44px] font-black leading-[0.98] tracking-[-0.035em] text-white lg:text-[56px]">
+              <h1 className="text-[38px] font-black leading-[0.98] tracking-[-0.035em] text-white lg:text-[46px]">
                 ¿Qué quieres
                 <br />
                 guardar hoy?
               </h1>
-              <p className="mx-auto mt-4 max-w-[560px] text-base leading-relaxed text-white/55">
+              <p className="mx-auto mt-4 max-w-[460px] text-sm leading-relaxed text-white/55">
                 Pega el enlace de un video, una playlist completa o una publicación. Tú eliges si te quedas con el audio o con el video.
               </p>
             </header>
           )}
 
-          <div className="flex w-full max-w-[780px] flex-col items-center gap-3">
+          <div className="flex w-full max-w-[620px] flex-col items-center gap-3">
             <UrlInputBar
               value={url}
               onChange={setUrl}
@@ -145,7 +145,7 @@ export function DownloadPanel() {
 
           {/* Also under an error, so the page isn't left empty. */}
           {visible && (status === "idle" || status === "error") && (
-            <div className="mt-10 flex w-full flex-col gap-10">
+            <div className="mt-10 flex w-full flex-col gap-9">
               <DownloadIntro />
             </div>
           )}

@@ -53,14 +53,14 @@ const KINDS: { title: string; text: string; icon: React.ReactNode }[] = [
 export function DownloadIntro() {
   return (
     <>
-      <ul className="grid w-full gap-4 md:grid-cols-3">
+      <ul className="grid w-full gap-3 md:grid-cols-3">
         {KINDS.map((kind) => (
-          <li key={kind.title} className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--accent)]" aria-hidden>
+          <li key={kind.title} className="rounded-2xl border border-white/[0.06] bg-white/[0.03] px-4 py-4">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--accent)]" aria-hidden>
               {kind.icon}
             </svg>
-            <p className="mt-3 text-base font-semibold text-white">{kind.title}</p>
-            <p className="mt-1.5 text-sm leading-relaxed text-white/50">{kind.text}</p>
+            <p className="mt-3 text-sm font-semibold text-white">{kind.title}</p>
+            <p className="mt-1 text-xs leading-relaxed text-white/50">{kind.text}</p>
           </li>
         ))}
       </ul>
@@ -92,13 +92,13 @@ function RecentDownloads() {
 
   return (
     <section className="w-full">
-      <div className="mb-3 flex items-baseline justify-between gap-4">
-        <h2 className="text-xl font-bold text-white">Bajado hace poco</h2>
+      <div className="mb-2 flex items-baseline justify-between gap-4">
+        <h2 className="text-lg font-bold text-white">Bajado hace poco</h2>
         {bridge && (
           <button
             type="button"
             onClick={() => void bridge.openLibraryFolder("root")}
-            className="text-sm font-medium text-[var(--accent)] underline-offset-4 transition hover:underline"
+            className="text-[13px] font-medium text-[var(--accent)] underline-offset-4 transition hover:underline"
           >
             Abrir carpeta
           </button>
@@ -110,24 +110,24 @@ function RecentDownloads() {
           const play = () =>
             kind === "music" ? player.actions.playTracks([toTrack(entry)], 0) : player.actions.playVideos([toVideoTrack(entry)], 0);
           return (
-            <li key={entry.id} className="group flex items-center gap-4 rounded-xl px-2.5 py-2 transition hover:bg-white/[0.04]">
+            <li key={entry.id} className="group flex items-center gap-3.5 rounded-xl px-2 py-1.5 transition hover:bg-white/[0.04]">
               <button type="button" onClick={play} tabIndex={-1} aria-hidden className="shrink-0">
                 <LibraryThumb
                   id={entry.id}
                   hasThumbnail={entry.hasThumbnail}
                   fallbackIcon={kind}
-                  className={`${kind === "music" ? "w-12" : "w-[85px]"} h-12 rounded-lg`}
+                  className={`${kind === "music" ? "w-10" : "w-[71px]"} h-10 rounded-md`}
                 />
               </button>
               <div className="min-w-0 flex-1">
-                <p className={`truncate text-[15px] font-medium ${isCurrent ? "text-[var(--accent)]" : "text-white"}`}>{entry.title}</p>
-                <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-white/45">
+                <p className={`truncate text-sm font-medium ${isCurrent ? "text-[var(--accent)]" : "text-white"}`}>{entry.title}</p>
+                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-white/45">
                   {entry.platform && <PlatformBadge platform={entry.platform} />}
                   {entry.platform && <span aria-hidden>·</span>}
                   <span>{whenSaved(entry.createdAt)}</span>
                 </p>
               </div>
-              <span className="hidden shrink-0 rounded-full bg-white/[0.07] px-2.5 py-1 text-xs font-medium text-white/70 sm:block">
+              <span className="hidden shrink-0 rounded-full bg-white/[0.07] px-2 py-0.5 text-[11px] font-medium text-white/70 sm:block">
                 {kind === "music" ? "Audio" : "Video"}
               </span>
               <button
@@ -135,12 +135,12 @@ function RecentDownloads() {
                 onClick={play}
                 aria-label={`Reproducir ${entry.title}`}
                 title="Reproducir"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 text-white outline-none transition hover:scale-105 hover:border-white/30 hover:bg-white/[0.06] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 text-white outline-none transition hover:scale-105 hover:border-white/30 hover:bg-white/[0.06] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
               >
                 {isCurrent && player.playing ? (
                   <PlayingBars className="h-3.5" />
                 ) : (
-                  <PlayerIcon name="play" size={16} />
+                  <PlayerIcon name="play" size={14} />
                 )}
               </button>
             </li>
