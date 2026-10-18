@@ -7,6 +7,11 @@ const PLATFORM_META: Record<Platform, { label: string; dotClass: string }> = {
   twitter: { label: "X", dotClass: "bg-white" },
 };
 
+/** "YouTube", "TikTok", "Instagram" or "X". */
+export function platformLabel(platform: Platform): string {
+  return PLATFORM_META[platform].label;
+}
+
 export function PlatformBadge({ platform }: { platform: Platform }) {
   const meta = PLATFORM_META[platform];
   return (

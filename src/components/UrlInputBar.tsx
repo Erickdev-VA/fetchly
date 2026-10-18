@@ -8,9 +8,11 @@ interface Props {
   onSubmit: () => void;
   onPasteClick: () => void;
   disabled?: boolean;
+  /** With something already loaded: a ✕ that clears the link, in place of Pegar. */
+  onClear?: () => void;
 }
 
-export function UrlInputBar({ value, onChange, onSubmit, onPasteClick, disabled }: Props) {
+export function UrlInputBar({ value, onChange, onSubmit, onPasteClick, disabled, onClear }: Props) {
   return (
     <div className="flex h-[52px] w-full items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] pl-5 pr-1.5 transition focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_4px_rgb(109_93_252/0.15)] hover:border-white/20 focus-within:hover:border-[var(--accent)] sm:h-14 sm:pl-5 sm:pr-1.5">
       <NavIcon name="link" className="h-[18px] w-[18px] shrink-0 text-white/45" />
@@ -30,6 +32,19 @@ export function UrlInputBar({ value, onChange, onSubmit, onPasteClick, disabled 
         }}
         className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder:text-white/35 outline-none disabled:opacity-50 sm:text-[15px]"
       />
+      {onClear ? (
+        <button
+          type="button"
+          onClick={onClear}
+          aria-label="Quitar el enlace"
+          title="Quitar el enlace"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/50 transition hover:bg-white/[0.08] hover:text-white"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      ) : (
       <button
         type="button"
         onClick={onPasteClick}
@@ -42,6 +57,7 @@ export function UrlInputBar({ value, onChange, onSubmit, onPasteClick, disabled 
         </svg>
         Pegar
       </button>
+      )}
     </div>
   );
 }
