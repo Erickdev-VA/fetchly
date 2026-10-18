@@ -107,6 +107,8 @@ export function LibrarySearch() {
             setQuery(e.target.value);
             setActive(0);
             setOpen(true);
+            // In case it wasn't read on focus (or that failed).
+            if (!library) load();
           }}
           onFocus={() => {
             setOpen(true);

@@ -1,5 +1,5 @@
 /** The page's side margins and width cap, shared with the top bar so both line up. */
-export const FRAME_CLASS = "mx-auto w-full max-w-[1800px] px-6 lg:px-10 2xl:px-14";
+export const FRAME_CLASS = "mx-auto w-full max-w-[1632px] px-6 md:px-10 lg:px-16 xl:px-24";
 
 /**
  * The frame of a library page (Inicio, Música, a playlist, Videos): it fills

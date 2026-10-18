@@ -227,7 +227,8 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  // Opens maximized (filling the screen, taskbar still visible); maximize() also shows it.
+  mainWindow.once("ready-to-show", () => mainWindow.maximize());
 
   // The X quits the whole app, like "Salir" in the tray: music, mini player,
   // server and any download in progress. Minimizing is how to keep it going.

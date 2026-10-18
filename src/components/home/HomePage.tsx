@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLibrary, usePlaylists } from "@/hooks/useLibrary";
 import { formatDuration } from "@/lib/format";
 import { recentPositions } from "@/lib/library/videoPositions";
@@ -16,11 +16,11 @@ import { PlaylistMosaic } from "../playlists/PlaylistMosaic";
 import { NavIcon } from "../shell/NavIcon";
 import { PAGE_CLASS } from "../shell/PageHeader";
 
-// One row of each: as many cards as the columns at that width (see the grids below).
-const PLAYLIST_CARDS = 6;
+// Playlist cards keep one size (px, matches w-[220px] and gap-5); the row shows as many as fit.
+const PLAYLIST_CARD_PX = 220;
+const PLAYLIST_GAP_PX = 20;
+// Videos: one row, as many cards as the columns at that width (see the grid below).
 const VIDEO_CARDS = 4;
-// A card past the columns of the current width is hidden, so each section is a single row.
-const PLAYLIST_HIDE = ["", "", "", "hidden lg:block", "hidden xl:block", "hidden 2xl:block"];
 const VIDEO_HIDE = ["", "", "hidden md:block", "hidden xl:block"];
 
 const CARD_CLASS =
@@ -37,6 +37,9 @@ export function HomePage() {
   const { items: videos } = useLibrary("video");
   const playableVideos = useMemo(() => (videos ?? []).filter((v) => !v.missing), [videos]);
 
+  const playlistRow = useRef<HTMLUListElement>(null);
+  const playlistsShown = useFitCount(playlistRow, PLAYLIST_CARD_PX, PLAYLIST_GAP_PX);
+
   const resume = resumable(playableVideos, player.current?.track.id ?? null);
 
   const playVideo = (entry: LibraryEntry) => {
@@ -45,26 +48,13 @@ export function HomePage() {
   };
 
   return (
-    <div className={`${PAGE_CLASS} flex flex-col gap-10`}>
-      <Link href="/descargar" className={`group flex items-center gap-5 px-5 py-5 lg:px-6 ${CARD_CLASS}`}>
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white">
-          <NavIcon name="link" className="h-6 w-6" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-lg font-bold tracking-tight text-white lg:text-xl">Pega un enlace para guardar algo nuevo</span>
-          <span className="mt-1 block text-sm text-white/50">
-            Videos y playlists de YouTube, TikTok, reels de Instagram y videos de X. Tú eliges audio o video.
-          </span>
-        </span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-white/40 transition group-hover:translate-x-0.5 group-hover:text-white/80" aria-hidden>
-          <path d="m9 6 6 6-6 6" />
-        </svg>
-      </Link>
+    <div className={`${PAGE_CLASS} flex flex-col gap-8`}>
+      <LinkCard />
 
       {(player.current || resume) && (
         <section aria-labelledby="home-continue">
           <SectionHeader id="home-continue" title="Continuar" />
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
             {player.current && <NowPlayingCard />}
             {resume && <ResumeCard entry={resume.entry} seconds={resume.seconds} onPlay={() => playVideo(resume.entry)} />}
           </div>
@@ -78,9 +68,9 @@ export function HomePage() {
             title="Playlists"
             link={{ href: "/musica", label: playlists.length === 1 ? "Ver la playlist" : `Ver las ${playlists.length}` }}
           />
-          <ul className="grid grid-cols-3 gap-5 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-            {playlists.slice(0, PLAYLIST_CARDS).map((p, i) => (
-              <li key={p.id} className={PLAYLIST_HIDE[i]}>
+          <ul ref={playlistRow} className="flex gap-5 overflow-hidden">
+            {playlists.slice(0, playlistsShown).map((p) => (
+              <li key={p.id} className="w-[220px] shrink-0">
                 <PlaylistCard playlist={p} />
               </li>
             ))}
@@ -108,6 +98,66 @@ export function HomePage() {
   );
 }
 
+// "Pega un enlace…" on Inicio, until its ✕ hides it for good (this computer only).
+const LINK_CARD_KEY = "pista.home.linkCardHidden";
+const linkCardListeners = new Set<() => void>();
+
+function linkCardHidden(): boolean {
+  try {
+    return localStorage.getItem(LINK_CARD_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function hideLinkCard(): void {
+  try {
+    localStorage.setItem(LINK_CARD_KEY, "1");
+  } catch {}
+  for (const listener of linkCardListeners) listener();
+}
+
+function subscribeLinkCard(listener: () => void): () => void {
+  linkCardListeners.add(listener);
+  return () => linkCardListeners.delete(listener);
+}
+
+/** The way into Descargar, with a ✕ in its corner to remove it. */
+function LinkCard() {
+  // Left out of the server render, so a hidden card never flashes in.
+  const hidden = useSyncExternalStore(subscribeLinkCard, linkCardHidden, () => true);
+  if (hidden) return null;
+  return (
+    <div className="relative w-full max-w-[640px]">
+      <Link href="/descargar" className={`group flex w-full items-center gap-4 py-3.5 pl-4 pr-10 ${CARD_CLASS}`}>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white">
+          <NavIcon name="link" className="h-5 w-5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-bold tracking-tight text-white">Pega un enlace para guardar algo nuevo</span>
+          <span className="mt-0.5 block text-[13px] text-white/50">
+            YouTube, TikTok, Instagram y X. Tú eliges audio o video.
+          </span>
+        </span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-white/40 transition group-hover:translate-x-0.5 group-hover:text-white/80" aria-hidden>
+          <path d="m9 6 6 6-6 6" />
+        </svg>
+      </Link>
+      <button
+        type="button"
+        onClick={hideLinkCard}
+        aria-label="Quitar este mensaje"
+        title="Quitar"
+        className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-white/35 outline-none transition hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 /** The video watched most recently that was left before the end (and isn't the one playing). */
 function resumable(videos: LibraryEntry[], currentId: string | null): { entry: LibraryEntry; seconds: number } | null {
   if (videos.length === 0) return null;
@@ -119,10 +169,25 @@ function resumable(videos: LibraryEntry[], currentId: string | null): { entry: L
   return null;
 }
 
+/** How many cards of `cardPx` (with `gapPx` between) fit across `ref`'s width, at least one. */
+function useFitCount(ref: React.RefObject<HTMLElement | null>, cardPx: number, gapPx: number): number {
+  const [count, setCount] = useState(5);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      setCount(Math.max(1, Math.floor((el.clientWidth + gapPx) / (cardPx + gapPx))));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
+  return count;
+}
+
 function SectionHeader({ id, title, link }: { id: string; title: string; link?: { href: string; label: string } }) {
   return (
-    <div className="mb-4 flex items-end justify-between gap-4">
-      <h2 id={id} className="text-2xl font-bold tracking-tight text-white">
+    <div className="mb-3 flex items-end justify-between gap-4">
+      <h2 id={id} className="text-xl font-bold tracking-tight text-white">
         {title}
       </h2>
       {link && (
@@ -155,26 +220,26 @@ function NowPlayingCard() {
   const label = player.playing ? (isVideo ? "Viendo ahora" : "Sonando ahora") : "En pausa";
 
   return (
-    <button type="button" onClick={onClick} className={`group flex items-center gap-5 p-4 text-left ${CARD_CLASS}`}>
-      <div className={`relative h-[100px] shrink-0 overflow-hidden rounded-xl ${isVideo ? "w-[178px]" : "w-[100px]"}`}>
+    <button type="button" onClick={onClick} className={`group flex items-center gap-4 p-3 text-left ${CARD_CLASS}`}>
+      <div className={`relative h-16 shrink-0 overflow-hidden rounded-lg ${isVideo ? "w-[114px]" : "w-16"}`}>
         <LibraryThumb id={track.id} hasThumbnail={track.hasThumbnail} fallbackIcon={isVideo ? "video" : "music"} className="h-full w-full" />
         <span className="absolute inset-0 flex items-center justify-center bg-black/45">
           {player.playing ? (
             <>
-              <PlayingBars className="h-8 gap-1 group-hover:hidden" barClassName="w-1.5" />
-              <PlayerIcon name="pause" size={28} className="hidden text-white group-hover:block" />
+              <PlayingBars className="h-5 gap-[3px] group-hover:hidden" barClassName="w-1" />
+              <PlayerIcon name="pause" size={22} className="hidden text-white group-hover:block" />
             </>
           ) : (
-            <PlayerIcon name="play" size={28} className="text-white" />
+            <PlayerIcon name="play" size={22} className="text-white" />
           )}
         </span>
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-[11px] font-medium uppercase tracking-wider text-white/45">{label}</p>
-        <p className="mt-1.5 truncate text-lg font-semibold text-white" title={track.title}>
+        <p className="mt-1 truncate text-[15px] font-semibold text-white" title={track.title}>
           {track.title}
         </p>
-        <p className="mt-1 truncate text-sm text-white/45">
+        <p className="mt-0.5 truncate text-[13px] text-white/45">
           {track.artist && <>{track.artist} · </>}
           <NowTime duration={player.duration ?? track.durationSeconds} />
         </p>
@@ -200,11 +265,11 @@ function ResumeCard({ entry, seconds, onPlay }: { entry: LibraryEntry; seconds: 
   const progress = duration ? Math.min(100, (seconds / duration) * 100) : null;
   const minutesLeft = duration ? Math.max(1, Math.round((duration - seconds) / 60)) : null;
   return (
-    <button type="button" onClick={onPlay} className={`group flex items-center gap-5 p-4 text-left ${CARD_CLASS}`}>
-      <div className="relative h-[100px] w-[178px] shrink-0 overflow-hidden rounded-xl">
+    <button type="button" onClick={onPlay} className={`group flex items-center gap-4 p-3 text-left ${CARD_CLASS}`}>
+      <div className="relative h-16 w-[114px] shrink-0 overflow-hidden rounded-lg">
         <LibraryThumb id={entry.id} hasThumbnail={entry.hasThumbnail} fallbackIcon="video" className="h-full w-full" />
         <span className="absolute inset-0 flex items-center justify-center bg-black/35 transition group-hover:bg-black/50">
-          <PlayerIcon name="play" size={28} className="text-white" />
+          <PlayerIcon name="play" size={22} className="text-white" />
         </span>
         {progress !== null && (
           <span className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
@@ -214,10 +279,10 @@ function ResumeCard({ entry, seconds, onPlay }: { entry: LibraryEntry; seconds: 
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-[11px] font-medium uppercase tracking-wider text-white/45">Seguir viendo</p>
-        <p className="mt-1.5 truncate text-lg font-semibold text-white" title={entry.title}>
+        <p className="mt-1 truncate text-[15px] font-semibold text-white" title={entry.title}>
           {entry.title}
         </p>
-        <p className="mt-1 flex items-center gap-2 truncate text-sm text-white/45">
+        <p className="mt-0.5 flex items-center gap-2 truncate text-[13px] text-white/45">
           {entry.platform && <PlatformBadge platform={entry.platform} />}
           {minutesLeft !== null && <span>quedan {minutesLeft} min</span>}
         </p>
